@@ -94,5 +94,96 @@ export const GEMINI_MODELS = {
 } as const;
 
 export const MAX_VIDEO_DURATION_MINUTES = 30;
-export const STOP_POINTS_MIN = 3;
-export const STOP_POINTS_MAX = 7;
+
+// Remove fixed STOP_POINTS_MIN and STOP_POINTS_MAX, replace with guidance
+export const STOP_POINTS_GUIDANCE = `
+Generate an appropriate number of questions based on video length and content density:
+- Short videos (<5 min): 2-4 questions
+- Medium videos (5-15 min): 4-6 questions  
+- Long videos (15-30 min): 6-8 questions
+- Very long videos (>30 min): 8-12 questions
+Adjust based on content richness - more questions for dense educational content.
+`;
+
+// Question Types for structured learning
+export const QUESTION_TYPES = {
+  // Recall & Understanding
+  FACTUAL: {
+    id: 'factual',
+    name: 'Factual Recall',
+    description: 'Tests specific facts, definitions, or details from the video',
+    example: 'What voltage did the speaker recommend for this circuit?',
+    bloomLevel: 1,
+  },
+  CONCEPTUAL: {
+    id: 'conceptual', 
+    name: 'Conceptual Understanding',
+    description: 'Tests understanding of concepts, principles, or relationships',
+    example: 'Explain why the speaker chose a capacitor at this stage.',
+    bloomLevel: 2,
+  },
+  
+  // Application & Analysis
+  PREDICTION: {
+    id: 'prediction',
+    name: 'Prediction',
+    description: 'Asks what will/should happen next based on context',
+    example: 'What do you think the speaker will do next to resolve this conflict?',
+    bloomLevel: 3,
+  },
+  DIAGNOSTIC: {
+    id: 'diagnostic',
+    name: 'Diagnostic Analysis',
+    description: 'Identifies problems, mistakes, or areas for improvement',
+    example: 'What went wrong in this negotiation exchange?',
+    bloomLevel: 4,
+  },
+  APPLICATION: {
+    id: 'application',
+    name: 'Real-World Application',
+    description: 'Applies concepts to new situations or personal context',
+    example: 'How would you use this technique in your own workplace?',
+    bloomLevel: 3,
+  },
+  
+  // Synthesis & Evaluation
+  SYNTHESIS: {
+    id: 'synthesis',
+    name: 'Synthesis',
+    description: 'Combines multiple concepts or creates new solutions',
+    example: 'How would you modify this approach for a different audience?',
+    bloomLevel: 5,
+  },
+  DESIGN_REASONING: {
+    id: 'design-reasoning',
+    name: 'Design Reasoning',
+    description: 'Explains WHY certain choices were made (technical mode)',
+    example: 'Why did they use brushless motors instead of brushed?',
+    bloomLevel: 4,
+  },
+  EVALUATION: {
+    id: 'evaluation',
+    name: 'Critical Evaluation',
+    description: 'Judges effectiveness, compares alternatives, critiques approach',
+    example: 'Was the speaker\'s response effective? What would you do differently?',
+    bloomLevel: 6,
+  },
+  
+  // Open-ended & Creative
+  OPEN_ENDED: {
+    id: 'open-ended',
+    name: 'Open-Ended Exploration',
+    description: 'No single correct answer, encourages creative thinking',
+    example: 'What other applications can you think of for this technique?',
+    bloomLevel: 5,
+  },
+  REFLECTION: {
+    id: 'reflection',
+    name: 'Personal Reflection',
+    description: 'Connects content to personal experience or goals',
+    example: 'How does this relate to challenges you\'ve faced?',
+    bloomLevel: 4,
+  },
+} as const;
+
+export type QuestionTypeId = keyof typeof QUESTION_TYPES;

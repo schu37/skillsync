@@ -25,14 +25,40 @@ export type QuestionType = 'prediction' | 'diagnostic' | 'synthesis' | 'design-r
 // STOP POINTS & QUESTIONS
 // ============================================
 
+export interface ScoringCriterion {
+  criterion: string;      // e.g., "Identifies the key negotiation tactic used"
+  points: number;         // e.g., 1
+  description?: string;   // Optional explanation for this criterion
+}
+
 export interface StopPoint {
   id: string;
   timestamp: number; // in seconds
   contextSummary: string;
   question: string;
-  questionType?: QuestionType;
+  questionType: 'factual' | 'conceptual' | 'prediction' | 'diagnostic' | 'application' | 'synthesis' | 'design-reasoning' | 'evaluation' | 'open-ended' | 'reflection';
   rubric: string;
   referenceAnswer: string;
+  scoringCriteria?: ScoringCriterion[]; // Specific criteria for scoring (should total 5 points)
+}
+
+// Stored answer for a question
+export interface AnsweredQuestion {
+  stopPointId: string;
+  question: string;
+  userAnswer: string;
+  evaluation: Evaluation;
+  answeredAt: string;
+}
+
+// Session data stored per video+mode
+export interface VideoSession {
+  videoUrl: string;
+  mode: SkillMode;
+  lessonPlanId: string;
+  answeredQuestions: AnsweredQuestion[];
+  lastAccessedAt: string;
+  regenerationCount: number; // Track how many times questions were regenerated
 }
 
 // ============================================
@@ -118,8 +144,10 @@ export type LessonPlan = SoftSkillsLessonPlan | TechnicalLessonPlan;
 export const isTechnicalPlan = (plan: LessonPlan): plan is TechnicalLessonPlan =>
   plan.mode === 'technical';
 
-export const isSoftSkillsPlan = (plan: LessonPlan): plan is SoftSkillsLessonPlan =>
-  plan.mode === 'soft';
+// Type guard for soft skills lesson plan
+export const isSoftSkillsPlan = (plan: LessonPlan): plan is SoftSkillsLessonPlan => {
+  return plan.mode === 'soft';
+};
 
 // ============================================
 // EVALUATION & FEEDBACK
