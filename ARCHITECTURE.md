@@ -3,7 +3,7 @@
 > **Last Updated**: January 21, 2026  
 > **Version**: 0.2.0  
 > **Hackathon**: Google Gemini 3 Devpost ($100K Prize Pool)  
-> **Deadline**: February 10, 2026
+> **Deadline**: Jan 30, 2026
 
 ---
 
@@ -94,8 +94,12 @@ Skillsync/
 | Feature | Status | Priority | Notes |
 |---------|--------|----------|-------|
 | Video Analysis (Gemini 3) | ✅ Done | P0 | Native YouTube URL input |
-| Stop Point Questions | ✅ Done | P0 | 3-7 questions per video |
-| Answer Evaluation | ✅ Done | P0 | Score, strengths, improvements |
+| Stop Point Questions | ✅ Done | P0 | Dynamic count based on video length |
+| Answer Evaluation | ✅ Done | P0 | Score based on video-specific criteria |
+| **Question Types System** | ✅ Done | P0 | Bloom's taxonomy-based variety |
+| **Answered Questions Storage** | ✅ Done | P1 | 30-day persistence per video |
+| **Skip Answered Toggle** | ✅ Done | P1 | Focus on unanswered questions |
+| **Regenerate Questions** | ✅ Done | P1 | Get different questions for same video |
 | Soft Skills Mode | ✅ Done | P0 | Communication, negotiation |
 | Technical Skills Mode | ✅ Done | P0 | Parts list, build steps |
 | Timeline Markers | ✅ Done | P1 | Clickable to seek |
@@ -103,11 +107,42 @@ Skillsync/
 | API Logging (Debug) | ✅ Done | P1 | Console group logs |
 | **Video Caching** | ✅ Done | P1 | 7-day TTL, per URL+mode |
 | **Markdown Export** | ✅ Done | P1 | Download full session |
-| **Google Docs Export** | 🔄 Partial | P1 | Button added, OAuth pending |
-| **Voice Roleplay** | 🔄 TODO | P1 | Gemini Live API integration |
+| **Google Docs Export** | ✅ Done | P1 | OAuth flow implemented |
+| **Question-Specific Scoring** | ✅ Done | P1 | Each question has measurable criteria |
+| **Voice Roleplay** | ✅ Done | P1 | Gemini Live API integration |
 | Study Pack Generation | ✅ Done | P2 | Markdown summary |
 | Safety Disclaimer | ✅ Done | P2 | User acknowledgment |
 | Google Sheets Export | 🔨 Partial | P2 | Parts list export |
+| **Legal Compliance** | ✅ Done | P1 | Privacy Policy, Terms of Service, AI Disclaimer |
+
+---
+
+## 📚 Question Types System
+
+SkillSync uses a structured question taxonomy based on Bloom's Taxonomy to ensure comprehensive learning:
+
+### Question Types
+
+| Type | Bloom Level | Description | Example |
+|------|-------------|-------------|---------|
+| **Factual** | 1 (Remember) | Tests specific facts or details | "What voltage was recommended?" |
+| **Conceptual** | 2 (Understand) | Tests understanding of concepts | "Explain why a capacitor is needed here" |
+| **Prediction** | 3 (Apply) | What will/should happen next | "What should the speaker say next?" |
+| **Application** | 3 (Apply) | Apply to new situations | "How would you use this at work?" |
+| **Diagnostic** | 4 (Analyze) | Identify problems or issues | "What went wrong in this exchange?" |
+| **Design-Reasoning** | 4 (Analyze) | Explain WHY choices were made | "Why use brushless motors?" |
+| **Synthesis** | 5 (Evaluate) | Combine concepts creatively | "How would you modify this approach?" |
+| **Evaluation** | 6 (Create) | Judge effectiveness, compare | "Was this response effective?" |
+| **Open-Ended** | 5-6 | No single correct answer | "What other applications exist?" |
+| **Reflection** | 4 | Connect to personal experience | "How does this relate to your challenges?" |
+
+### Dynamic Question Count
+
+Questions are generated based on video content, not fixed limits:
+- Short videos (<5 min): 2-4 questions
+- Medium videos (5-15 min): 4-6 questions
+- Long videos (15-30 min): 6-8 questions
+- Very long videos (>30 min): 8-12 questions
 
 ---
 
@@ -343,9 +378,21 @@ npm run build  # Output to dist/
 
 ### Environment Variables
 ```env
-GEMINI_API_KEY=xxx          # Required
-GOOGLE_CLIENT_ID=xxx        # For Docs/Sheets export
+VITE_GEMINI_API_KEY=xxx        # Required - Gemini API key
+VITE_GOOGLE_CLIENT_ID=xxx      # Required for Google Docs export
 ```
+
+### Setting Up Google OAuth Client ID
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing
+3. Enable the **Google Docs API** and **Google Drive API**
+4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
+5. Select **Web application**
+6. Add authorized JavaScript origins:
+   - `http://localhost:5173` (for dev)
+   - Your production domain
+7. Copy the Client ID to `.env.local` as `VITE_GOOGLE_CLIENT_ID`
 
 ---
 
@@ -367,16 +414,63 @@ GOOGLE_CLIENT_ID=xxx        # For Docs/Sheets export
 - [ ] Long videos (>30min) may timeout on analysis
 
 ### TODOs
-- [ ] Add video caching (same URL → reuse results)
-- [ ] Wire up "Export to Google Docs" button in UI
+- [x] ~~Add video caching (same URL → reuse results)~~
+- [x] ~~Wire up "Export to Google Docs" button in UI~~
+- [x] ~~Add question-specific scoring criteria~~
 - [ ] Implement voice roleplay with Gemini Live API
-- [ ] Improve question coverage prompts
 - [ ] Add progress persistence (resume sessions)
+- [ ] Add typing chat about the video with gemini
 - [ ] Mobile responsive improvements
 
+### TODOs
+- [ ] Create nodes and trees or flow charts about how each knowledge points are interconnected. 
 ---
 
 ## 📝 Changelog
+
+### v0.5.1 (2026-01-22)
+- **Legal Compliance**: Added Privacy Policy, Terms of Service, and AI Disclaimer
+  - First-time user consent modal requiring acceptance of all terms
+  - Clear AI-generated content warnings
+  - Persistent consent stored in localStorage
+  - Footer with links to legal pages and AI warning
+- Added `/terms` and `/privacy` routes for legal pages
+- Added `DisclaimerModal` component with checkbox consent flow
+
+### v0.5.0 (2026-01-22)
+- **Voice Roleplay**: Full implementation with Gemini Live API
+  - Real-time bidirectional voice conversation
+  - Push-to-talk interface with visual feedback
+  - AI plays roleplay persona based on video context
+  - Text fallback mode available
+  - Automatic feedback at end of conversation
+- Added `useVoiceRoleplay` hook for WebSocket management
+- Added `VoiceRoleplay` component with modal UI
+
+### v0.4.1 (2026-01-22)
+- **Question navigation**: Added Previous/Next buttons to navigate between questions
+- **Progress dots**: Visual indicator showing all questions with answered status
+- **Video seek on question click**: Clicking any question seeks video to that timestamp
+- **Answered badges**: Shows checkmarks on answered questions in navigation
+
+### v0.4.0 (2026-01-22)
+- **Dynamic question count**: Number of questions based on video length and content density
+- **Question types system**: 10 question types based on Bloom's taxonomy
+- **Answered questions storage**: Persists Q&A history per video for 30 days
+- **Skip answered toggle**: Focus on unanswered questions only
+- **Regenerate questions**: Generate different questions for the same video
+- **Question type badges**: Visual indicator of question type in UI
+
+### v0.3.1 (2026-01-22)
+- Export buttons (Markdown, Google Docs) now visible in lesson plan view from the start
+- Users can export at any time, not just after completing all questions
+
+### v0.3.0 (2026-01-22)
+- Added question-specific scoring criteria (video/question-dependent rubrics)
+- Wired up Google Docs export with OAuth flow
+- Added answer character limit (500 chars) with live counter
+- Fixed deprecated `substr` → `slice`
+- Fixed evidence timestamp null check
 
 ### v0.2.0 (2026-01-21)
 - Added clickable timeline markers

@@ -6,10 +6,11 @@ interface VideoPlayerProps {
   stopPoints: StopPoint[];
   currentStopIndex: number;
   onTimeUpdate: (time: number) => void;
-  onReachStopPoint: (stopIndex: number) => void;
-  onSeekToStopPoint?: (index: number, timestamp: number) => void;
+  onReachStopPoint: (index: number) => void;
+  onSeekToStopPoint: (index: number, timestamp: number) => void;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
+  seekToTimestamp?: number | null; // NEW: external seek request
 }
 
 declare global {
@@ -28,6 +29,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onSeekToStopPoint,
   isPlaying,
   setIsPlaying,
+  seekToTimestamp,
 }) => {
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -184,6 +186,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
   }, [isPlaying]);
+
+  // NEW: Handle external seek requests
+  useEffect(() => {
+    if (seekToTimestamp !== null && seekToTimestamp !== undefined && playerRef.current) {
+      playerRef.current.seekTo(seekToTimestamp, true);
+    }
+  }, [seekToTimestamp]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

@@ -5,7 +5,7 @@
  * Can be swapped to Supabase by implementing SupabaseStorageService.
  */
 
-import { LessonPlan, SavedLessonPlan, UserSession } from '../types';
+import { LessonPlan, SavedLessonPlan, UserSession, SkillMode, VideoSession, AnsweredQuestion, Evaluation } from '../types';
 
 // ============================================
 // STORAGE INTERFACE
@@ -164,6 +164,118 @@ export const videoCache = {
       localStorage.setItem(STORAGE_KEYS.VIDEO_CACHE, JSON.stringify(cache));
     } catch {}
   }
+};
+
+// ============================================
+// SESSION STORAGE (Answered Questions)
+// ============================================
+
+const SESSION_PREFIX = 'skillsync_session_';
+const SESSION_TTL_DAYS = 30; // Keep sessions for 30 days
+
+const getSessionKey = (videoUrl: string, mode: SkillMode): string => {
+  return `${SESSION_PREFIX}${btoa(videoUrl)}_${mode}`;
+};
+
+export const sessionStorage = {
+  get(videoUrl: string, mode: SkillMode): VideoSession | null {
+    try {
+      const key = getSessionKey(videoUrl, mode);
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+      
+      const session: VideoSession = JSON.parse(stored);
+      
+      // Check if expired (30 days)
+      const lastAccess = new Date(session.lastAccessedAt);
+      const now = new Date();
+      const daysDiff = (now.getTime() - lastAccess.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (daysDiff > SESSION_TTL_DAYS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+      
+      return session;
+    } catch {
+      return null;
+    }
+  },
+  
+  set(videoUrl: string, mode: SkillMode, lessonPlanId: string): VideoSession {
+    const key = getSessionKey(videoUrl, mode);
+    const existing = this.get(videoUrl, mode);
+    
+    const session: VideoSession = existing || {
+      videoUrl,
+      mode,
+      lessonPlanId,
+      answeredQuestions: [],
+      lastAccessedAt: new Date().toISOString(),
+      regenerationCount: 0,
+    };
+    
+    session.lastAccessedAt = new Date().toISOString();
+    localStorage.setItem(key, JSON.stringify(session));
+    return session;
+  },
+  
+  addAnswer(
+    videoUrl: string, 
+    mode: SkillMode, 
+    stopPointId: string,
+    question: string,
+    userAnswer: string, 
+    evaluation: Evaluation
+  ): void {
+    const key = getSessionKey(videoUrl, mode);
+    const session = this.get(videoUrl, mode);
+    if (!session) return;
+    
+    // Remove existing answer for this question (if re-answering)
+    session.answeredQuestions = session.answeredQuestions.filter(
+      aq => aq.stopPointId !== stopPointId
+    );
+    
+    // Add new answer
+    session.answeredQuestions.push({
+      stopPointId,
+      question,
+      userAnswer,
+      evaluation,
+      answeredAt: new Date().toISOString(),
+    });
+    
+    session.lastAccessedAt = new Date().toISOString();
+    localStorage.setItem(key, JSON.stringify(session));
+  },
+  
+  getAnsweredIds(videoUrl: string, mode: SkillMode): Set<string> {
+    const session = this.get(videoUrl, mode);
+    if (!session) return new Set();
+    return new Set(session.answeredQuestions.map(aq => aq.stopPointId));
+  },
+  
+  clearAnswers(videoUrl: string, mode: SkillMode): void {
+    const session = this.get(videoUrl, mode);
+    if (!session) return;
+    
+    session.answeredQuestions = [];
+    session.lastAccessedAt = new Date().toISOString();
+    const key = getSessionKey(videoUrl, mode);
+    localStorage.setItem(key, JSON.stringify(session));
+  },
+  
+  incrementRegeneration(videoUrl: string, mode: SkillMode): number {
+    const session = this.get(videoUrl, mode);
+    if (!session) return 0;
+    
+    session.regenerationCount += 1;
+    session.lastAccessedAt = new Date().toISOString();
+    const key = getSessionKey(videoUrl, mode);
+    localStorage.setItem(key, JSON.stringify(session));
+    return session.regenerationCount;
+  },
 };
 
 class LocalStorageService implements StorageService {
@@ -331,3 +443,105 @@ class SupabaseStorageService implements StorageService {
 
 // To switch: export const storage = new SupabaseStorageService();
 */
+
+// ============================================
+// VIDEO CONTEXT CACHE (Separate from lesson plan)
+// ============================================
+
+interface CachedVideoContext {
+  videoUrl: string;
+  videoContext: string;
+  summary: string;
+  skillsDetected: string[];
+  suitabilityScore: number;
+  cachedAt: string;
+  // Technical mode extras
+  projectType?: string;
+  components?: any[];
+  tools?: any[];
+  buildSteps?: any[];
+  designDecisions?: any[];
+  safetyOverview?: string;
+  requiredPrecautions?: string[];
+  // Soft skills extras
+  scenarioPreset?: string;
+  rolePlayPersona?: string;
+}
+
+const VIDEO_CONTEXT_PREFIX = 'skillsync_video_context_';
+const VIDEO_CONTEXT_TTL_DAYS = 30; // Context valid for 30 days
+
+export const videoContextCache = {
+  getKey(url: string, mode: SkillMode): string {
+    return `${VIDEO_CONTEXT_PREFIX}${btoa(url)}_${mode}`;
+  },
+  
+  get(url: string, mode: SkillMode): CachedVideoContext | null {
+    try {
+      const key = this.getKey(url, mode);
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+      
+      const cached: CachedVideoContext = JSON.parse(stored);
+      
+      // Check TTL
+      const cachedDate = new Date(cached.cachedAt);
+      const now = new Date();
+      const daysDiff = (now.getTime() - cachedDate.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (daysDiff > VIDEO_CONTEXT_TTL_DAYS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+      
+      return cached;
+    } catch {
+      return null;
+    }
+  },
+  
+  set(url: string, mode: SkillMode, context: Omit<CachedVideoContext, 'cachedAt'>): void {
+    try {
+      const key = this.getKey(url, mode);
+      const cached: CachedVideoContext = {
+        ...context,
+        cachedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(key, JSON.stringify(cached));
+    } catch (e) {
+      console.warn('Failed to cache video context:', e);
+    }
+  },
+  
+  // Extract context from a full lesson plan
+  extractFromPlan(plan: LessonPlan): Omit<CachedVideoContext, 'cachedAt'> {
+    const base = {
+      videoUrl: plan.videoUrl,
+      videoContext: plan.videoContext,
+      summary: plan.summary,
+      skillsDetected: plan.skillsDetected,
+      suitabilityScore: plan.suitabilityScore,
+    };
+    
+    if (plan.mode === 'technical') {
+      const techPlan = plan as TechnicalLessonPlan;
+      return {
+        ...base,
+        projectType: techPlan.projectType,
+        components: techPlan.components,
+        tools: techPlan.tools,
+        buildSteps: techPlan.buildSteps,
+        designDecisions: techPlan.designDecisions,
+        safetyOverview: techPlan.safetyOverview,
+        requiredPrecautions: techPlan.requiredPrecautions,
+      };
+    } else {
+      const softPlan = plan as SoftSkillsLessonPlan;
+      return {
+        ...base,
+        scenarioPreset: softPlan.scenarioPreset,
+        rolePlayPersona: softPlan.rolePlayPersona,
+      };
+    }
+  },
+};

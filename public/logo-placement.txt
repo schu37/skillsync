@@ -1,0 +1,11 @@
+Save the attached logo image to this repository as `public/logo.png`.
+
+Steps:
+1. Download the image you attached in this chat.
+2. Place it in the project root `public` folder with the name `logo.png`.
+   - Path: public/logo.png
+3. Restart the dev server (`npm run dev`) if it's running.
+
+Notes:
+- Vite serves files in `public` at the site root, so the app will load the file at `/logo.png`.
+- If you prefer a different filename or path, update the `src` attribute in `App.tsx` accordingly.

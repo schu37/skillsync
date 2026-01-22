@@ -181,7 +181,29 @@ export const exportToGoogleDocs = async (
   });
 
   if (!createResponse.ok) {
-    throw new Error('Failed to create Google Doc');
+    const errorData = await createResponse.json().catch(() => ({}));
+    console.error('Google Docs API error:', createResponse.status, errorData);
+    
+    if (createResponse.status === 403) {
+      const errorMessage = errorData?.error?.message || '';
+      if (errorMessage.includes('not enabled') || errorMessage.includes('API has not been used')) {
+        throw new Error(
+          'Google Docs API is not enabled.\n\n' +
+          '1. Go to: https://console.cloud.google.com/apis/library/docs.googleapis.com\n' +
+          '2. Click "Enable"\n' +
+          '3. Try exporting again'
+        );
+      }
+      throw new Error(
+        'Access denied (403). Please check:\n' +
+        '1. Google Docs API is enabled in your Cloud Console\n' +
+        '2. OAuth consent screen is configured\n' +
+        '3. Your Google account has access to the app\n\n' +
+        `Details: ${errorMessage}`
+      );
+    }
+    
+    throw new Error(`Failed to create Google Doc: ${createResponse.status} ${errorData?.error?.message || ''}`);
   }
 
   const doc = await createResponse.json();
