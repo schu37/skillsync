@@ -37,12 +37,29 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
     
     setIsEvaluating(true);
     try {
+      console.log('🔄 Submitting answer for evaluation...');
       const evaluation = await evaluateAnswer(currentStopPoint, answer, lessonPlan);
-      setCurrentEvaluation(evaluation);
-      onAnswerSubmit(answer, evaluation);
+      console.log('✅ Evaluation received:', evaluation);
+      
+      // Validate the evaluation object
+      if (!evaluation || typeof evaluation.score !== 'number') {
+        throw new Error('Invalid evaluation response');
+      }
+      
+      // Ensure arrays exist
+      const safeEvaluation = {
+        ...evaluation,
+        strengths: evaluation.strengths || [],
+        improvements: evaluation.improvements || [],
+        evidence: evaluation.evidence || [],
+        rewrittenAnswer: evaluation.rewrittenAnswer || 'No improved answer provided.',
+      };
+      
+      setCurrentEvaluation(safeEvaluation);
+      onAnswerSubmit(answer, safeEvaluation);
     } catch (e) {
-      alert("Failed to evaluate. Please try again.");
-    } finally {
+      console.error('❌ Evaluation error:', e);
+      alert("Failed to evaluate. Please try again. Error: " + (e instanceof Error ? e.message : 'Unknown error'));
       setIsEvaluating(false);
     }
   };
@@ -80,7 +97,15 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
 
   // Question Interaction State
   if (mode === AppMode.PAUSED_INTERACTION || mode === AppMode.EVALUATING || mode === AppMode.FEEDBACK) {
-    if (!currentStopPoint) return null;
+    // Handle missing stop point gracefully
+    if (!currentStopPoint) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 p-8 text-center bg-white rounded-xl shadow-sm border border-slate-100">
+          <p className="text-lg font-medium">Loading question...</p>
+          <p className="text-sm mt-2">If this persists, try clicking a question from the list.</p>
+        </div>
+      );
+    }
 
     return (
       <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -99,7 +124,17 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
 
         {/* Content */}
         <div className="flex-1 p-6 overflow-y-auto">
-          {mode === AppMode.FEEDBACK && currentEvaluation ? (
+          {/* Show loading during evaluation */}
+          {isEvaluating && (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-lg font-medium text-slate-700">Evaluating your answer...</p>
+              <p className="text-sm text-slate-500">Gemini is analyzing your response</p>
+            </div>
+          )}
+          
+          {/* Show feedback after evaluation */}
+          {!isEvaluating && mode === AppMode.FEEDBACK && currentEvaluation ? (
             <div className="space-y-6 animate-fadeIn">
               {/* Score */}
               <div className="flex items-center gap-4">
@@ -161,7 +196,7 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : !isEvaluating ? (
             /* Input Form */
             <div className="space-y-4">
               <div className="bg-blue-50 p-4 rounded-lg text-sm text-blue-800 mb-4">
@@ -177,12 +212,12 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
                 disabled={isEvaluating}
               />
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Footer Actions */}
         <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-          {mode === AppMode.FEEDBACK ? (
+          {mode === AppMode.FEEDBACK && currentEvaluation ? (
             <button
               onClick={handleContinue}
               className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
@@ -190,24 +225,22 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
               Continue Video
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
+          ) : isEvaluating ? (
+            <div className="px-6 py-2 text-slate-500 font-medium flex items-center gap-2">
+              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              Evaluating...
+            </div>
           ) : (
             <button
               onClick={handleSubmit}
-              disabled={isEvaluating || !answer.trim()}
+              disabled={!answer.trim()}
               className={`px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                isEvaluating || !answer.trim()
+                !answer.trim()
                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white'
               }`}
             >
-              {isEvaluating ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  Evaluating...
-                </>
-              ) : (
-                'Submit Answer'
-              )}
+              Submit Answer
             </button>
           )}
         </div>
