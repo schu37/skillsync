@@ -278,6 +278,77 @@ export const sessionStorage = {
   },
 };
 
+// ============================================
+// NOTES STORAGE
+// ============================================
+
+interface VideoNotes {
+  videoUrl: string;
+  mode: SkillMode;
+  aiGeneratedNotes: string;
+  userNotes: string;
+  updatedAt: string;
+}
+
+const NOTES_PREFIX = 'skillsync_notes_';
+const NOTES_TTL_DAYS = 90; // Keep notes for 90 days
+
+export const notesStorage = {
+  getKey(url: string, mode: SkillMode): string {
+    return `${NOTES_PREFIX}${btoa(url)}_${mode}`;
+  },
+
+  get(url: string, mode: SkillMode): VideoNotes | null {
+    try {
+      const key = this.getKey(url, mode);
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+
+      const notes: VideoNotes = JSON.parse(stored);
+
+      // Check TTL
+      const updatedDate = new Date(notes.updatedAt);
+      const now = new Date();
+      const daysDiff = (now.getTime() - updatedDate.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysDiff > NOTES_TTL_DAYS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+
+      return notes;
+    } catch {
+      return null;
+    }
+  },
+
+  save(url: string, mode: SkillMode, aiNotes: string, userNotes: string): void {
+    try {
+      const key = this.getKey(url, mode);
+      const notes: VideoNotes = {
+        videoUrl: url,
+        mode,
+        aiGeneratedNotes: aiNotes,
+        userNotes,
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(key, JSON.stringify(notes));
+    } catch (e) {
+      console.warn('Failed to save notes:', e);
+    }
+  },
+
+  updateUserNotes(url: string, mode: SkillMode, userNotes: string): void {
+    const existing = this.get(url, mode);
+    this.save(url, mode, existing?.aiGeneratedNotes || '', userNotes);
+  },
+
+  updateAINotes(url: string, mode: SkillMode, aiNotes: string): void {
+    const existing = this.get(url, mode);
+    this.save(url, mode, aiNotes, existing?.userNotes || '');
+  },
+};
+
 class LocalStorageService implements StorageService {
   // --- User ---
   async getUser(): Promise<StoredUser | null> {

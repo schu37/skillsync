@@ -38,6 +38,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [playerError, setPlayerError] = useState<string | null>(null);
   const intervalRef = useRef<number | null>(null);
 
+  // Reset state when video changes
+  useEffect(() => {
+    setDuration(0);
+    setCurrentTime(0);
+    setPlayerError(null);
+  }, [videoId]);
+
   // Initialize YouTube API
   useEffect(() => {
     setPlayerError(null);
@@ -124,7 +131,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const onPlayerReady = (event: any) => {
-    setDuration(event.target.getDuration());
+    // Get duration - sometimes it's 0 initially, so we'll also check in the timer
+    const dur = event.target.getDuration();
+    if (dur > 0) {
+      setDuration(dur);
+    }
     setPlayerError(null);
   };
 
@@ -143,6 +154,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (event.data === window.YT.PlayerState.PLAYING) {
       setIsPlaying(true);
       startTimer();
+      // Also try to get duration when video starts playing (fallback)
+      if (playerRef.current && playerRef.current.getDuration) {
+        const dur = playerRef.current.getDuration();
+        if (dur > 0) {
+          setDuration(dur);
+        }
+      }
     } else {
       setIsPlaying(false);
       stopTimer();
@@ -156,6 +174,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         const time = playerRef.current.getCurrentTime();
         setCurrentTime(time);
         onTimeUpdate(time);
+        
+        // Fallback: update duration if it's still 0
+        if (duration === 0 && playerRef.current.getDuration) {
+          const dur = playerRef.current.getDuration();
+          if (dur > 0) {
+            setDuration(dur);
+          }
+        }
         
         // Check stop points
         const nextStop = stopPoints[currentStopIndex];
@@ -191,6 +217,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     if (seekToTimestamp !== null && seekToTimestamp !== undefined && playerRef.current) {
       playerRef.current.seekTo(seekToTimestamp, true);
+      // Update currentTime immediately so the blue timeline syncs
+      setCurrentTime(seekToTimestamp);
     }
   }, [seekToTimestamp]);
 
@@ -245,20 +273,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {/* Progress */}
           <div 
             className="absolute h-full bg-indigo-500 rounded-full transition-all duration-300"
-            style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
+            style={{ width: `${Math.min((currentTime / (duration || 1)) * 100, 100)}%` }}
           />
           
-          {/* Stop Points Markers */}
-          {stopPoints.map((sp, idx) => (
-            <button
-              key={sp.id}
-              onClick={() => handleMarkerClick(idx, sp.timestamp)}
-              className={`absolute w-4 h-4 -mt-1 rounded-full border-2 border-white transform -translate-x-1/2 transition-all duration-200 z-10 cursor-pointer hover:scale-125 hover:ring-2 hover:ring-indigo-300
-                ${idx < currentStopIndex ? 'bg-green-500' : idx === currentStopIndex ? 'bg-amber-500 animate-pulse' : 'bg-slate-400 hover:bg-indigo-400'}`}
-              style={{ left: `${(sp.timestamp / (duration || 1)) * 100}%` }}
-              title={`Q${idx + 1}: ${formatTime(sp.timestamp)} - Click to jump`}
-            />
-          ))}
+          {/* Stop Points Markers - only show if duration is valid and timestamp is within bounds */}
+          {duration > 0 && stopPoints
+            .filter(sp => sp.timestamp <= duration) // Filter out markers beyond video duration
+            .map((sp, idx) => {
+              const actualIdx = stopPoints.findIndex(s => s.id === sp.id);
+              const leftPercent = Math.min((sp.timestamp / duration) * 100, 100);
+              
+              return (
+                <button
+                  key={sp.id}
+                  onClick={() => handleMarkerClick(actualIdx, sp.timestamp)}
+                  className={`absolute w-4 h-4 -mt-1 rounded-full border-2 border-white transform -translate-x-1/2 transition-all duration-200 z-10 cursor-pointer hover:scale-125 hover:ring-2 hover:ring-indigo-300
+                    ${actualIdx < currentStopIndex ? 'bg-green-500' : actualIdx === currentStopIndex ? 'bg-amber-500 animate-pulse' : 'bg-slate-400 hover:bg-indigo-400'}`}
+                  style={{ left: `${leftPercent}%` }}
+                  title={`Q${actualIdx + 1}: ${formatTime(sp.timestamp)} - Click to jump`}
+                />
+              );
+            })}
         </div>
       </div>
     </div>

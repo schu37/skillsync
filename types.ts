@@ -144,7 +144,7 @@ export type LessonPlan = SoftSkillsLessonPlan | TechnicalLessonPlan;
 export const isTechnicalPlan = (plan: LessonPlan): plan is TechnicalLessonPlan =>
   plan.mode === 'technical';
 
-// Type guard for soft skills lesson plan
+// Make sure these type guards are exported
 export const isSoftSkillsPlan = (plan: LessonPlan): plan is SoftSkillsLessonPlan => {
   return plan.mode === 'soft';
 };

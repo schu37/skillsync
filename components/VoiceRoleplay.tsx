@@ -1,16 +1,83 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useVoiceRoleplay, VoiceRoleplayConfig, ConnectionState } from '../hooks/useVoiceRoleplay';
 import { SoftSkillsLessonPlan } from '../types';
+import { roleplayChat } from '../services/geminiService';
 
 interface VoiceRoleplayProps {
   lessonPlan: SoftSkillsLessonPlan;
   onClose: () => void;
+  onPauseVideo?: () => void;  // NEW: pause video when roleplay starts
 }
 
-const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) => {
+const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPauseVideo }) => {
   const [textInput, setTextInput] = useState('');
   const [useTextMode, setUseTextMode] = useState(false);
+  const [useFallbackChat, setUseFallbackChat] = useState(false);  // Fallback text chat mode
+  const [fallbackMessages, setFallbackMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([]);
+  const [isLoadingFallback, setIsLoadingFallback] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Pause video when component mounts
+  useEffect(() => {
+    onPauseVideo?.();
+  }, [onPauseVideo]);
+
+  // Handle fallback text chat submission
+  const handleFallbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textInput.trim() || isLoadingFallback) return;
+    
+    const userMessage = textInput.trim();
+    setTextInput('');
+    
+    // Add user message
+    setFallbackMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setIsLoadingFallback(true);
+    
+    try {
+      const response = await roleplayChat(
+        config.persona,
+        config.scenario,
+        config.videoContext,
+        [...fallbackMessages, { role: 'user', content: userMessage }]
+      );
+      
+      setFallbackMessages(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (e) {
+      console.error('Fallback chat error:', e);
+      setFallbackMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. Please try again.' 
+      }]);
+    } finally {
+      setIsLoadingFallback(false);
+    }
+  };
+
+  // Start fallback chat with initial greeting
+  const startFallbackChat = async () => {
+    setUseFallbackChat(true);
+    setIsLoadingFallback(true);
+    
+    try {
+      const response = await roleplayChat(
+        config.persona,
+        config.scenario,
+        config.videoContext,
+        [] // Empty messages to get initial greeting
+      );
+      
+      setFallbackMessages([{ role: 'assistant', content: response }]);
+    } catch (e) {
+      console.error('Failed to start fallback chat:', e);
+      setFallbackMessages([{ 
+        role: 'assistant', 
+        content: `Hello! I'm playing the role of ${config.persona}. How can I help you practice today?` 
+      }]);
+    } finally {
+      setIsLoadingFallback(false);
+    }
+  };
 
   // Build config from lesson plan
   const config: VoiceRoleplayConfig = {
@@ -85,28 +152,37 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) =>
             </button>
           </div>
           
-          {/* Connection status */}
-          <div className="flex items-center gap-2 mt-3">
-            {getStatusIcon(connectionState)}
-            <span className="text-sm text-white/90 capitalize">{connectionState}</span>
-            {isSpeaking && (
-              <span className="text-sm text-white/90 flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                AI Speaking...
-              </span>
-            )}
-            {isListening && (
-              <span className="text-sm text-white/90 flex items-center gap-1">
-                <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
-                Listening...
-              </span>
-            )}
-          </div>
+          {/* Connection status - only show for voice mode */}
+          {!useFallbackChat && (
+            <div className="flex items-center gap-2 mt-3">
+              {getStatusIcon(connectionState)}
+              <span className="text-sm text-white/90 capitalize">{connectionState}</span>
+              {isSpeaking && (
+                <span className="text-sm text-white/90 flex items-center gap-1">
+                  <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  AI Speaking...
+                </span>
+              )}
+              {isListening && (
+                <span className="text-sm text-white/90 flex items-center gap-1">
+                  <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
+                  Listening...
+                </span>
+              )}
+            </div>
+          )}
+          {useFallbackChat && (
+            <div className="flex items-center gap-2 mt-3">
+              <span className="w-3 h-3 bg-green-500 rounded-full" />
+              <span className="text-sm text-white/90">Text Chat Active</span>
+            </div>
+          )}
         </div>
 
         {/* Messages */}
         <div className="flex-1 p-4 overflow-y-auto bg-slate-50 space-y-4">
-          {connectionState === 'disconnected' && messages.length === 0 && (
+          {/* Show welcome screen only when not in fallback and no messages */}
+          {!useFallbackChat && connectionState === 'disconnected' && messages.length === 0 && (
             <div className="text-center py-8">
               <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -124,7 +200,26 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) =>
             </div>
           )}
 
-          {messages.map((msg, idx) => (
+          {/* Fallback chat messages */}
+          {useFallbackChat && fallbackMessages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] p-3 rounded-2xl ${
+                  msg.role === 'user'
+                    ? 'bg-indigo-600 text-white rounded-br-sm'
+                    : 'bg-white text-slate-800 border border-slate-200 rounded-bl-sm shadow-sm'
+                }`}
+              >
+                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+              </div>
+            </div>
+          ))}
+
+          {/* Voice chat messages */}
+          {!useFallbackChat && messages.map((msg, idx) => (
             <div
               key={idx}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -144,7 +239,20 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) =>
             </div>
           ))}
           
-          {error && (
+          {/* Loading indicator for fallback chat */}
+          {isLoadingFallback && (
+            <div className="flex justify-start">
+              <div className="bg-white text-slate-800 border border-slate-200 rounded-2xl rounded-bl-sm shadow-sm p-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {error && !useFallbackChat && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
               {error}
             </div>
@@ -155,8 +263,53 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) =>
 
         {/* Controls */}
         <div className="p-4 border-t border-slate-100 bg-white">
-          {connectionState === 'disconnected' ? (
+          {/* Fallback text chat controls */}
+          {useFallbackChat ? (
             <div className="space-y-3">
+              <form onSubmit={handleFallbackSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Type your response..."
+                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                  disabled={isLoadingFallback}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!textInput.trim() || isLoadingFallback}
+                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-medium rounded-xl transition-colors"
+                >
+                  Send
+                </button>
+              </form>
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-slate-500">
+                  Practice your communication skills with AI
+                </p>
+                <button
+                  onClick={() => {
+                    setUseFallbackChat(false);
+                    setFallbackMessages([]);
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-700"
+                >
+                  End Chat
+                </button>
+              </div>
+            </div>
+          ) : connectionState === 'disconnected' ? (
+            <div className="space-y-3">
+              {/* Show error with fallback option */}
+              {error && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 p-3 rounded-lg text-sm mb-3">
+                  <p className="font-medium mb-1">Voice chat unavailable</p>
+                  <p className="text-xs">{error}</p>
+                  <p className="text-xs mt-2">The Gemini Live API may require additional setup or may not be available in your region.</p>
+                </div>
+              )}
+              
               <button
                 onClick={connect}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
@@ -164,10 +317,22 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose }) =>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
-                Start Session
+                {error ? 'Try Voice Again' : 'Start Voice Session'}
               </button>
+              
+              {/* Text chat fallback option */}
+              <button
+                onClick={startFallbackChat}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                Use Text Chat Instead
+              </button>
+              
               <p className="text-xs text-center text-slate-500">
-                Requires microphone access. Make sure your speakers are on.
+                Voice requires microphone access. Text chat works without it.
               </p>
             </div>
           ) : connectionState === 'connecting' ? (

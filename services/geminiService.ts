@@ -935,7 +935,7 @@ Be creative and explore angles not covered in previous questions.
     const result: TechnicalLessonPlan = {
       id: crypto.randomUUID(),
       videoUrl: youtubeUrl,
-      mode: 'technical',
+      mode: 'technical' as const,
       createdAt: new Date().toISOString(),
       skillsDetected: context.skillsDetected,
       suitabilityScore: context.suitabilityScore,
@@ -960,5 +960,183 @@ Be creative and explore angles not covered in previous questions.
   } catch (e) {
     console.error("Failed to parse regenerated technical questions", e);
     throw new Error("Failed to generate new questions. Please try again.");
+  }
+};
+
+// ============================================
+// ROLEPLAY CHAT (Text-based fallback)
+// ============================================
+
+/**
+ * Text-based roleplay chat using the standard Gemini API
+ * This is a fallback when the Gemini Live API is unavailable
+ */
+export const roleplayChat = async (
+  persona: string,
+  scenario: string,
+  videoContext: string,
+  conversationHistory: { role: 'user' | 'assistant'; content: string }[]
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  const systemPrompt = `You are playing a character in a roleplay scenario for communication skills practice.
+
+CHARACTER: ${persona}
+
+SCENARIO CONTEXT: ${scenario}
+
+VIDEO CONTEXT (what the user learned): ${videoContext.slice(0, 1000)}
+
+INSTRUCTIONS:
+- Stay in character throughout the conversation
+- Be realistic but not hostile - push back appropriately as your character would
+- Keep responses concise (2-4 sentences typically)
+- Focus on: tone, persuasion techniques, active listening, handling objections
+- After 4-6 exchanges, naturally conclude the conversation and briefly break character to give constructive feedback
+
+${conversationHistory.length === 0 ? 'Start with a greeting appropriate to the scenario and your character.' : 'Continue the conversation naturally.'}`;
+
+  // Build conversation for the API
+  const contents = conversationHistory.length === 0
+    ? [{ role: 'user' as const, parts: [{ text: 'Start the roleplay scenario.' }] }]
+    : conversationHistory.map(msg => ({
+        role: msg.role === 'user' ? 'user' as const : 'model' as const,
+        parts: [{ text: msg.content }]
+      }));
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODELS.flash,
+      contents,
+      config: {
+        systemInstruction: systemPrompt,
+      },
+    });
+
+    const text = response.text || '';
+    logApi('roleplayChat', { persona, historyLength: conversationHistory.length, response: text.slice(0, 200) });
+    
+    return text;
+  } catch (e) {
+    console.error('Roleplay chat error:', e);
+    throw new Error('Failed to get AI response. Please try again.');
+  }
+};
+
+// ============================================
+// AUTO-GENERATE NOTES
+// ============================================
+
+/**
+ * Generate structured notes from video content
+ */
+export const generateVideoNotes = async (
+  plan: LessonPlan
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  const technicalSection = plan.mode === 'technical' ? `
+Include sections for:
+- Components/Parts List (with quantities)
+- Tools Required
+- Key Build Steps
+- Safety Considerations
+` : '';
+
+  const systemPrompt = `You are creating study notes for a video learning session.
+
+VIDEO SUMMARY: ${plan.summary}
+VIDEO CONTEXT: ${plan.videoContext}
+SKILLS: ${plan.skillsDetected.join(', ')}
+MODE: ${plan.mode === 'technical' ? 'Technical/DIY' : 'Soft Skills'}
+
+Create well-structured markdown notes that include:
+1. **Key Concepts** - Main ideas from the video
+2. **Important Points** - Bullet points of crucial information
+3. **Timestamps Reference** - Key moments worth rewatching
+4. **Action Items** - What the learner should practice
+${technicalSection}
+
+Format in clean markdown. Be concise but comprehensive.
+Keep it to about 300-500 words.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODELS.flash,
+      contents: `Generate study notes for this video.`,
+      config: {
+        systemInstruction: systemPrompt,
+      },
+    });
+
+    const notes = response.text || '';
+    logApi('generateVideoNotes', { summary: plan.summary.slice(0, 100), notesLength: notes.length });
+    return notes;
+  } catch (e) {
+    console.error('Failed to generate notes:', e);
+    throw new Error('Failed to generate notes. Please try again.');
+  }
+};
+
+// ============================================
+// VIDEO CHAT (Ask questions about the video)
+// ============================================
+
+/**
+ * Chat about video content - ask questions, get clarifications
+ */
+export const videoChatMessage = async (
+  plan: LessonPlan,
+  userMessage: string,
+  conversationHistory: { role: 'user' | 'assistant'; content: string }[]
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  const systemPrompt = `You are a helpful tutor assistant for SkillSync. The user is learning from a video and wants to discuss or ask questions about its content.
+
+VIDEO SUMMARY: ${plan.summary}
+VIDEO CONTEXT: ${plan.videoContext}
+SKILLS COVERED: ${plan.skillsDetected.join(', ')}
+MODE: ${plan.mode === 'technical' ? 'Technical/DIY Build' : 'Soft Skills/Communication'}
+
+${plan.mode === 'technical' ? `
+TECHNICAL DETAILS:
+- Project: ${(plan as TechnicalLessonPlan).projectType || 'N/A'}
+- Components: ${JSON.stringify((plan as TechnicalLessonPlan).components?.slice(0, 5) || [])}
+` : `
+SOFT SKILLS CONTEXT:
+- Scenario: ${(plan as SoftSkillsLessonPlan).scenarioPreset || 'General'}
+`}
+
+INSTRUCTIONS:
+- Answer questions about the video content
+- Provide clarifications and explanations
+- Reference specific parts of the video when helpful
+- Be conversational but informative
+- If asked about something not in the video, say so and offer to help find related information
+- Keep responses concise (2-4 paragraphs max)`;
+
+  const contents = conversationHistory.map(msg => ({
+    role: msg.role === 'user' ? 'user' as const : 'model' as const,
+    parts: [{ text: msg.content }]
+  }));
+  
+  contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODELS.flash,
+      contents,
+      config: {
+        systemInstruction: systemPrompt,
+      },
+    });
+
+    const text = response.text || '';
+    logApi('videoChatMessage', { userMessage: userMessage.slice(0, 50), response: text.slice(0, 100) });
+    return text;
+  } catch (e) {
+    console.error('Video chat error:', e);
+    throw new Error('Failed to get response. Please try again.');
   }
 };

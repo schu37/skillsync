@@ -9,7 +9,6 @@ import VideoPlayer from './components/VideoPlayer';
 import InteractionPanel from './components/InteractionPanel';
 import ModeSelector from './components/ModeSelector';
 import TechnicalPanel from './components/TechnicalPanel';
-import VoiceRoleplay from './components/VoiceRoleplay';
 import DisclaimerModal, { hasAcceptedTerms } from './components/DisclaimerModal';
 import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -33,8 +32,6 @@ const App: React.FC = () => {
   const [skipAnswered, setSkipAnswered] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [seekTimestamp, setSeekTimestamp] = useState<number | null>(null);
-  const [showVoiceRoleplay, setShowVoiceRoleplay] = useState(false);
-  const [showDisclaimer, setShowDisclaimer] = useState(false);
   
   // Google OAuth configuration
   const isGoogleOAuthConfigured = !!(import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
@@ -426,35 +423,38 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           {/* Left Column: Video Player */}
-          <div className="lg:col-span-7 flex flex-col bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-             {videoId ? (
-                 <VideoPlayer 
-                    videoId={videoId}
-                    stopPoints={lessonPlan?.stopPoints || []}
-                    currentStopIndex={currentStopIndex}
-                    onTimeUpdate={handleTimeUpdate}
-                    onReachStopPoint={handleReachStopPoint}
-                    onSeekToStopPoint={(idx, _ts) => {
-                      handleSelectStopPoint(idx);
-                    }}
-                    isPlaying={isPlaying}
-                    setIsPlaying={setIsPlaying}
-                    seekToTimestamp={seekTimestamp} // NEW prop
-                 />
-             ) : (
-                <div className="h-full flex flex-col items-center justify-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
-                    <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p>Enter a URL to begin</p>
-                </div>
-             )}
+          <div className="lg:col-span-5 xl:col-span-5">
+            <div className="lg:sticky lg:top-24">
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                {videoId ? (
+                    <VideoPlayer 
+                       videoId={videoId}
+                       stopPoints={lessonPlan?.stopPoints || []}
+                       currentStopIndex={currentStopIndex}
+                       onTimeUpdate={handleTimeUpdate}
+                       onReachStopPoint={handleReachStopPoint}
+                       onSeekToStopPoint={(idx, _ts) => {
+                         handleSelectStopPoint(idx);
+                       }}
+                       isPlaying={isPlaying}
+                       setIsPlaying={setIsPlaying}
+                       seekToTimestamp={seekTimestamp} // NEW prop
+                    />
+                ) : (
+                   <div className="aspect-video flex flex-col items-center justify-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
+                       <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                       </svg>
+                       <p>Enter a URL to begin</p>
+                   </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Right Column: Interaction & Plan */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
-             {/* Show TechnicalPanel for technical mode in plan ready state */}
+          {/* Right Column: Interaction Panel with Tabs */}
+          <div className="lg:col-span-7 xl:col-span-7 flex flex-col gap-4 min-h-[600px]">
              {lessonPlan && isTechnicalPlan(lessonPlan) && mode === AppMode.PLAN_READY ? (
                <TechnicalPanel 
                  plan={lessonPlan}
@@ -477,9 +477,6 @@ const App: React.FC = () => {
                   answeredQuestionIds={answeredQuestionIds}
                   skipAnswered={skipAnswered}
                   onToggleSkipAnswered={() => setSkipAnswered(!skipAnswered)}
-                  // Pass voice roleplay props
-                  showVoiceRoleplayButton={!!(lessonPlan && isSoftSkillsPlan(lessonPlan) && lessonPlan.rolePlayPersona)}
-                  onStartVoiceRoleplay={() => setShowVoiceRoleplay(true)}
                />
              )}
           </div>
@@ -508,14 +505,6 @@ const App: React.FC = () => {
 
       {/* Add padding at bottom for footer */}
       <div className="h-10" />
-
-      {/* Voice Roleplay Modal */}
-      {showVoiceRoleplay && lessonPlan && isSoftSkillsPlan(lessonPlan) && (
-        <VoiceRoleplay
-          lessonPlan={lessonPlan}
-          onClose={() => setShowVoiceRoleplay(false)}
-        />
-      )}
     </div>
   );
 };
