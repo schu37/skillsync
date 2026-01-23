@@ -106,26 +106,22 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
       mediaStreamRef.current = stream;
 
       // Connect to Gemini Live API via WebSocket
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      // Using the v1beta endpoint for Gemini 2.0
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      
+      console.log('🎙️ Connecting to Gemini Live API...');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('🎙️ WebSocket connected');
+        console.log('🎙️ WebSocket connected, sending setup...');
         
-        // Send setup message
+        // Send setup message - using correct format for Gemini 2.0 Live API
         const setupMessage = {
           setup: {
-            model: 'models/gemini-2.0-flash-live-001',
+            model: 'models/gemini-2.0-flash-exp',
             generationConfig: {
-              responseModalities: ['AUDIO', 'TEXT'],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: 'Aoede' // Professional female voice
-                  }
-                }
-              }
+              responseModalities: ['TEXT'],  // Start with text only for reliability
             },
             systemInstruction: {
               parts: [{
@@ -144,14 +140,21 @@ INSTRUCTIONS:
 - At the end, briefly break character to give feedback on how the user did
 - Focus on: tone, persuasion techniques, active listening, handling objections
 
-Speak naturally as your character would. Start with a greeting appropriate to the scenario.`
+Start with a greeting appropriate to the scenario.`
               }]
             }
           }
         };
         
-        ws.send(JSON.stringify(setupMessage));
-        setConnectionState('connected');
+        try {
+          ws.send(JSON.stringify(setupMessage));
+          console.log('🎙️ Setup message sent');
+        } catch (e) {
+          console.error('🎙️ Failed to send setup:', e);
+          setError('Failed to initialize session');
+          setConnectionState('error');
+          return;
+        }
         
         // Add initial assistant message
         setMessages([{
@@ -161,9 +164,15 @@ Speak naturally as your character would. Start with a greeting appropriate to th
         }]);
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
-          const data = JSON.parse(event.data);
+          // Handle Blob data (binary) - convert to text first
+          let rawData = event.data;
+          if (rawData instanceof Blob) {
+            rawData = await rawData.text();
+          }
+          
+          const data = JSON.parse(rawData);
           
           // Handle server content (audio/text response)
           if (data.serverContent) {
@@ -217,8 +226,20 @@ Speak naturally as your character would. Start with a greeting appropriate to th
         setConnectionState('error');
       };
 
-      ws.onclose = () => {
-        console.log('🎙️ WebSocket closed');
+      ws.onclose = (event) => {
+        console.log('🎙️ WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
+        
+        // Provide helpful error messages based on close code
+        if (event.code === 1002 || event.code === 1003) {
+          setError('Protocol error - the API may have changed. Please try again.');
+        } else if (event.code === 1008) {
+          setError('Policy violation - check your API key permissions.');
+        } else if (event.code === 4000 || event.code === 4001) {
+          setError('Invalid API key or model not available.');
+        } else if (!event.wasClean && connectionState === 'connecting') {
+          setError('Connection failed. The Gemini Live API may not be available in your region.');
+        }
+        
         setConnectionState('disconnected');
         setIsListening(false);
       };
