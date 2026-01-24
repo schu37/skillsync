@@ -25,6 +25,8 @@ interface InteractionPanelProps {
   // NEW: Voice roleplay props
   showVoiceRoleplayButton?: boolean;
   onStartVoiceRoleplay?: () => void;
+  // NEW: Selected scenario from dropdown
+  selectedScenario?: string;
 }
 
 // Helper to get question type info
@@ -56,6 +58,7 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
   onToggleSkipAnswered,
   showVoiceRoleplayButton = false,
   onStartVoiceRoleplay,
+  selectedScenario,
 }) => {
   const [answer, setAnswer] = useState("");
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -159,20 +162,28 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
     );
   }
 
-  // Render tab content
+  // Render tab content - keep all tabs mounted to preserve state
   const renderTabContent = () => {
     if (!lessonPlan) return null;
 
-    switch (activeTab) {
-      case 'notes':
-        return <NotesSection lessonPlan={lessonPlan} />;
-      case 'chat':
-        return <VideoChatSection lessonPlan={lessonPlan} />;
-      case 'qa':
-      default:
-        // Return existing Q&A content
-        return renderQAContent();
-    }
+    return (
+      <>
+        {/* Notes Tab - hidden when not active */}
+        <div className={activeTab === 'notes' ? 'flex flex-col h-full' : 'hidden'}>
+          <NotesSection lessonPlan={lessonPlan} />
+        </div>
+        
+        {/* Chat Tab - hidden when not active */}
+        <div className={activeTab === 'chat' ? 'flex flex-col h-full' : 'hidden'}>
+          <VideoChatSection lessonPlan={lessonPlan} selectedScenario={selectedScenario} onStartVoiceRoleplay={onStartVoiceRoleplay} />
+        </div>
+        
+        {/* Q&A Tab - hidden when not active */}
+        <div className={activeTab === 'qa' ? 'flex flex-col h-full' : 'hidden'}>
+          {renderQAContent()}
+        </div>
+      </>
+    );
   };
 
   // Extract existing Q&A rendering into a function
@@ -712,8 +723,8 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
                   </p>
                 </div>
               )}
-           </div>
-        </div>
+            </div>
+          </div>
       );
     }
 
@@ -724,7 +735,7 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
     <div className="flex flex-col h-full">
       {/* Tab Navigation - Only show when lesson plan exists */}
       {showTabs && (
-        <div className="flex gap-1 p-2 bg-white rounded-t-xl border border-b-0 border-slate-100">
+        <div className="sticky top-0 z-10 flex gap-1 p-2 bg-white rounded-t-xl border border-b-0 border-slate-100 shadow-sm">
           <button
             onClick={() => setActiveTab('qa')}
             className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${

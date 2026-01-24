@@ -20,6 +20,7 @@ const logApi = (label: string, data: any) => {
   if (DEBUG) {
     console.group(`🤖 Gemini API: ${label}`);
     console.log(data);
+    console.log('Full data (no truncation):', JSON.stringify(data, null, 2).slice(0, 5000)); // Show up to 5000 chars
     console.groupEnd();
   }
 };
@@ -207,9 +208,14 @@ const TechnicalQuestionSchema: Schema = {
 const ModeDetectionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
+    isEducational: {
+      type: Type.BOOLEAN,
+      description: "True if video contains educational/learnable content, false for pure entertainment"
+    },
     detectedMode: { 
       type: Type.STRING, 
-      description: "Either 'technical' or 'soft' based on video content" 
+      description: "Either 'technical' or 'soft' based on video content",
+      nullable: true
     },
     confidence: { 
       type: Type.NUMBER, 
@@ -220,7 +226,7 @@ const ModeDetectionSchema: Schema = {
       description: "Brief explanation of why this mode was chosen" 
     },
   },
-  required: ["detectedMode", "confidence", "reasoning"],
+  required: ["isEducational", "confidence", "reasoning"],
 };
 
 /**
@@ -231,7 +237,17 @@ const detectVideoMode = async (
   youtubeUrl: string
 ): Promise<{ mode: SkillMode; confidence: number; reasoning: string }> => {
   const systemPrompt = `
-You are analyzing a video to determine if it's primarily about:
+You are analyzing a video to determine if it contains educational/learnable content and classify it.
+
+IMPORTANT: Set isEducational=true for ANY educational content including tutorials, lessons, how-tos, AND communication/soft skills demonstrations.
+
+ONLY set isEducational=false for pure entertainment with NO learning value:
+- Comedy sketches, vlogs, reactions (no skills taught)
+- Music videos, gaming highlights (no tutorial)
+- Random memes, advertisements
+- Pure product showcases (no how-to)
+
+IF isEducational=true, then classify as:
 
 TECHNICAL SKILLS (mode: 'technical'):
 - DIY/maker projects, builds, repairs
@@ -247,8 +263,7 @@ SOFT SKILLS (mode: 'soft'):
 - Sales, customer service, conflict resolution
 - Psychology, emotional intelligence
 
-Analyze the video content and determine which mode best fits.
-If it's a mix, choose the PRIMARY focus.
+Return JSON with: { "isEducational": boolean, "mode": "soft" | "technical" | null, "confidence": number, "reason": "brief explanation" }
 `;
 
   try {
@@ -275,19 +290,30 @@ If it's a mix, choose the PRIMARY focus.
     
     logApi('detectVideoMode', { 
       url: youtubeUrl, 
+      isEducational: result.isEducational,
       detected: result.detectedMode,
       confidence: result.confidence,
-      reasoning: result.reasoning 
+      reasoning: result.reasoning
     });
+
+    // Reject only pure entertainment (non-educational) content
+    if (result.isEducational === false) {
+      throw new Error(`This video doesn't contain learnable content. ${result.reasoning || 'Please try a tutorial, lesson, or how-to video.'}`);
+    }
+
+    if (!result.detectedMode) {
+      throw new Error('Could not determine learning category for this video.');
+    }
 
     return {
       mode: result.detectedMode === 'technical' ? 'technical' : 'soft',
       confidence: result.confidence || 50,
-      reasoning: result.reasoning || 'Unable to determine',
+      reasoning: result.reasoning || 'Detected educational content',
     };
   } catch (e) {
     console.error('Mode detection failed, defaulting to user selection', e);
-    return { mode: 'soft', confidence: 0, reasoning: 'Detection failed' };
+    // If error, don't block - let user choose mode
+    throw e;
   }
 };
 
@@ -788,7 +814,7 @@ export const regenerateQuestionsOnly = async (
   if (!cachedContext) {
     // No cache - need full analysis
     logApi('regenerateQuestionsOnly - No cache, doing full analysis', { url: youtubeUrl });
-    return generateLessonPlan(videoUrlOrId, mode, { ...options, regenerate: true });
+    return generateLessonPlan(videoUrlOrId, mode, { forceRefresh: true });
   }
   
   logApi('regenerateQuestionsOnly - Using cached context', { 
@@ -997,12 +1023,18 @@ INSTRUCTIONS:
 ${conversationHistory.length === 0 ? 'Start with a greeting appropriate to the scenario and your character.' : 'Continue the conversation naturally.'}`;
 
   // Build conversation for the API
+  // The last message should be from user, and we need to ensure the model generates a response
   const contents = conversationHistory.length === 0
     ? [{ role: 'user' as const, parts: [{ text: 'Start the roleplay scenario.' }] }]
     : conversationHistory.map(msg => ({
         role: msg.role === 'user' ? 'user' as const : 'model' as const,
         parts: [{ text: msg.content }]
       }));
+
+  // If the last message isn't from user, add a prompt to continue
+  if (contents.length > 0 && contents[contents.length - 1].role !== 'user') {
+    contents.push({ role: 'user' as const, parts: [{ text: '(Continue the roleplay based on what was just said)' }] });
+  }
 
   try {
     const response = await ai.models.generateContent({
@@ -1036,14 +1068,29 @@ export const generateVideoNotes = async (
   const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
   const technicalSection = plan.mode === 'technical' ? `
-Include sections for:
-- Components/Parts List (with quantities)
-- Tools Required
-- Key Build Steps
-- Safety Considerations
+Include DETAILED sections for:
+- **Components/Parts List** - Include EXACT model numbers, specifications, and quantities mentioned in the video
+  - For each part, note any alternatives mentioned
+  - Include estimated price ranges if discussed
+- **Where to Buy** - Suggest marketplaces for these parts:
+  - Amazon, AliExpress, Banggood for general electronics
+  - Specialty stores mentioned in the video
+  - Note: "Check local hobby shops for faster shipping"
+- **Tools Required** - Specific tool brands/models if mentioned
+- **Key Build Steps** - Numbered steps with timestamps
+- **Safety Considerations** - Warnings from the video
+- **Specifications & Settings** - Any calibration values, firmware settings, or configurations
 ` : '';
 
-  const systemPrompt = `You are creating study notes for a video learning session.
+  const softSkillsSection = plan.mode === 'soft' ? `
+Include sections for:
+- **Key Techniques** - Communication strategies discussed
+- **Example Phrases** - Specific wording suggestions from the video
+- **Body Language Tips** - Non-verbal communication points
+- **Practice Scenarios** - Situations to practice these skills
+` : '';
+
+  const systemPrompt = `You are creating comprehensive study notes for a video learning session.
 
 VIDEO SUMMARY: ${plan.summary}
 VIDEO CONTEXT: ${plan.videoContext}
@@ -1053,17 +1100,23 @@ MODE: ${plan.mode === 'technical' ? 'Technical/DIY' : 'Soft Skills'}
 Create well-structured markdown notes that include:
 1. **Key Concepts** - Main ideas from the video
 2. **Important Points** - Bullet points of crucial information
-3. **Timestamps Reference** - Key moments worth rewatching
+3. **Timestamps Reference** - Key moments worth rewatching (format: [MM:SS])
 4. **Action Items** - What the learner should practice
-${technicalSection}
+${technicalSection}${softSkillsSection}
 
-Format in clean markdown. Be concise but comprehensive.
-Keep it to about 300-500 words.`;
+IMPORTANT FOR TECHNICAL VIDEOS:
+- Extract SPECIFIC product names, model numbers, and specs mentioned
+- Don't just say "Thermal Camera" - say "TC256 Thermal Camera Module (160x120 resolution, 25Hz)"
+- Include links format: "Available on: Amazon, AliExpress, GetFPV"
+- Note any vendor recommendations from the video creator
+
+Format in clean markdown. Be detailed and comprehensive.
+Target 500-800 words for technical videos, 300-500 for soft skills.`;
 
   try {
     const response = await ai.models.generateContent({
       model: GEMINI_MODELS.flash,
-      contents: `Generate study notes for this video.`,
+      contents: `Generate detailed study notes for this video. For technical content, include exact part specifications and where to buy them.`,
       config: {
         systemInstruction: systemPrompt,
       },
@@ -1108,13 +1161,20 @@ SOFT SKILLS CONTEXT:
 - Scenario: ${(plan as SoftSkillsLessonPlan).scenarioPreset || 'General'}
 `}
 
+IMPORTANT RESTRICTIONS:
+- ONLY answer questions about this specific video and its content
+- ONLY discuss topics directly related to the skills and concepts covered in the video
+- If the user asks about unrelated topics, politely redirect them back to the video content
+- You may discuss broader context that helps understand the video, but stay focused on the learning material
+
 INSTRUCTIONS:
-- Answer questions about the video content
-- Provide clarifications and explanations
+- Answer questions about the video content clearly and accurately
+- Provide clarifications and explanations based on what was shown in the video
 - Reference specific parts of the video when helpful
-- Be conversational but informative
-- If asked about something not in the video, say so and offer to help find related information
-- Keep responses concise (2-4 paragraphs max)`;
+- Be conversational but informative and focused
+- If asked about something not covered in the video, acknowledge it and redirect: "That's not covered in this video, but I can help you understand [related topic from the video]."
+- Keep responses concise (2-4 paragraphs max)
+- Use plain text formatting - avoid markdown syntax like ** or * as they will be displayed literally`;
 
   const contents = conversationHistory.map(msg => ({
     role: msg.role === 'user' ? 'user' as const : 'model' as const,
@@ -1138,5 +1198,114 @@ INSTRUCTIONS:
   } catch (e) {
     console.error('Video chat error:', e);
     throw new Error('Failed to get response. Please try again.');
+  }
+};
+
+/**
+ * Analyze voice audio and generate roleplay response with emotion
+ */
+export const analyzeVoiceAndRespond = async (
+  audioBlob: Blob,
+  config: { persona: string; scenario: string; videoContext: string },
+  conversationHistory: { role: 'user' | 'assistant'; content: string }[]
+): Promise<{
+  userTranscript: string;
+  prosodyAnalysis: string;
+  responseText: string;
+  emotionalTone: string;
+  voiceDirection: string;
+}> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  // Convert blob to base64
+  const base64Audio = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = (reader.result as string).split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(audioBlob);
+  });
+
+  const conversationContext = conversationHistory.length > 0 
+    ? `\n\nConversation so far:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`
+    : '';
+
+  const prompt = `You are roleplaying as: ${config.persona}
+
+Scenario: ${config.scenario}
+
+Context from video: ${config.videoContext}${conversationContext}
+
+The user just sent you a voice message. 
+
+STEP 1: Analyze their voice for:
+- Tone (confident/nervous/assertive/passive/defensive)
+- Emotion (calm/frustrated/excited/angry/anxious)
+- Pace (rushed/measured/hesitant/slow)
+- Volume/energy (high/medium/low)
+- Speech patterns (clear/mumbling/stammering)
+- Overall delivery quality
+
+STEP 2: Respond IN CHARACTER based on:
+- What they said (content)
+- HOW they said it (prosody - tone, pace, emotion)
+- The roleplay scenario context
+- Your character's personality
+
+STEP 3: Choose your emotional response appropriately:
+- If they're confident and assertive → be more challenging/skeptical or respectful (depends on character)
+- If they're nervous or hesitant → be impatient, dismissive, or encouraging (depends on scenario)
+- If they're defensive → push back or probe deeper
+- Match realistic human reactions to their delivery
+
+STEP 4: Keep responses natural and conversational (2-3 sentences usually)
+
+Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
+{
+  "userTranscript": "what they said word-for-word",
+  "prosodyAnalysis": "Brief analysis: [confident/nervous] tone, [fast/slow] pace, [high/low] energy",
+  "responseText": "Your natural response in character",
+  "emotionalTone": "impatient|grateful|skeptical|angry|friendly|neutral|frustrated|dismissive|encouraging",
+  "voiceDirection": "How to deliver the response (e.g., 'speak firmly', 'sound exasperated')"
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODELS.flash,
+      contents: [{
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: 'audio/webm',
+              data: base64Audio
+            }
+          }
+        ]
+      }],
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const result = JSON.parse(response.text);
+    logApi('analyzeVoiceAndRespond', { 
+      prosody: result.prosodyAnalysis, 
+      emotion: result.emotionalTone 
+    });
+    
+    return result;
+  } catch (e) {
+    console.error('Voice analysis error:', e);
+    // Fallback response
+    return {
+      userTranscript: '(Could not transcribe)',
+      prosodyAnalysis: 'Unable to analyze',
+      responseText: "I didn't quite catch that. Could you try again?",
+      emotionalTone: 'neutral',
+      voiceDirection: 'speak normally'
+    };
   }
 };
