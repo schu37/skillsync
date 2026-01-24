@@ -12,6 +12,7 @@ import TechnicalPanel from './components/TechnicalPanel';
 import DisclaimerModal, { hasAcceptedTerms } from './components/DisclaimerModal';
 import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import VoiceRoleplay from './components/VoiceRoleplay';
 
 const App: React.FC = () => {
   // State
@@ -23,7 +24,7 @@ const App: React.FC = () => {
   const [sessionHistory, setSessionHistory] = useState<{ question: string; answer: string; evaluation: Evaluation }[]>([]);
   const [studyPack, setStudyPack] = useState<StudyPack | null>(null);
   const [skillMode, setSkillMode] = useState<SkillMode>('soft');
-  const [selectedPreset, setSelectedPreset] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('negotiation'); // Default to first soft skill preset
   const [isPlaying, setIsPlaying] = useState(false);
   const [logoLoaded, setLogoLoaded] = useState(true);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
@@ -32,6 +33,8 @@ const App: React.FC = () => {
   const [skipAnswered, setSkipAnswered] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [seekTimestamp, setSeekTimestamp] = useState<number | null>(null);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const [showVoiceRoleplay, setShowVoiceRoleplay] = useState(false);
   
   // Google OAuth configuration
   const isGoogleOAuthConfigured = !!(import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
@@ -100,6 +103,25 @@ const App: React.FC = () => {
     });
   }, []);
 
+  // Reset app to initial state
+  const resetApp = () => {
+    setMode(AppMode.IDLE);
+    setVideoUrl('');
+    setVideoId('');
+    setLessonPlan(null);
+    setCurrentStopIndex(0);
+    setSessionHistory([]);
+    setStudyPack(null);
+    setSkillMode('soft'); // Reset to soft skills by default
+    setSelectedPreset('negotiation'); // Reset to first preset
+    setIsPlaying(false);
+    setGoogleAccessToken(null);
+    setAnsweredQuestionIds(new Set());
+    setSkipAnswered(false);
+    setSeekTimestamp(null);
+    setShowVoiceRoleplay(false);
+  };
+
   // Helper to extract ID (supports watch, shorts, youtu.be, embed)
   const extractVideoId = (url: string) => {
     // Handle YouTube Shorts
@@ -118,10 +140,15 @@ const App: React.FC = () => {
     setIsPlaying(false);
     
     try {
+      // For soft skills, default to first preset if none selected
+      const effectivePreset = skillMode === 'soft' && !selectedPreset 
+        ? 'negotiation' 
+        : selectedPreset;
+      
       // Gemini 3 analyzes the video with native video input
       const plan = await generateLessonPlan(id, skillMode, {
-        scenarioPreset: skillMode === 'soft' ? selectedPreset : undefined,
-        projectType: skillMode === 'technical' ? selectedPreset : undefined,
+        scenarioPreset: skillMode === 'soft' ? effectivePreset : undefined,
+        projectType: skillMode === 'technical' ? effectivePreset : undefined,
       });
       
       // Ensure robust stop points
@@ -135,11 +162,14 @@ const App: React.FC = () => {
       
       setMode(AppMode.PLAN_READY);
       
-      // Auto-start after short delay
-      setTimeout(() => {
+      // Don't auto-start for technical mode (users need to read safety banner)
+      // For soft skills, auto-start after delay
+      if (skillMode === 'soft') {
+        setTimeout(() => {
           setMode(AppMode.PLAYING);
           setIsPlaying(true);
-      }, 1500);
+        }, 1500);
+      }
 
     } catch (e) {
       console.error(e);
@@ -368,7 +398,9 @@ const App: React.FC = () => {
                       skillMode={skillMode}
                       onModeChange={(m) => {
                         setSkillMode(m);
-                        setSelectedPreset('');
+                        // Default to first preset for soft skills, clear for technical
+                        const defaultPreset = m === 'soft' ? 'negotiation' : '';
+                        setSelectedPreset(defaultPreset);
                         storage.saveSettings({ preferredMode: m });
                       }}
                       selectedPreset={selectedPreset}
@@ -383,7 +415,7 @@ const App: React.FC = () => {
                             placeholder="Paste YouTube URL..." 
                             className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                             value={videoUrl}
-                            onChange={(e) => setVideoUrl(e.target.value)}
+                            onChange={(e) => setVideoUrl(e.target.value.trim())}
                         />
                         <button type="submit" className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
                             Load
@@ -394,22 +426,33 @@ const App: React.FC = () => {
             
             {/* Show current mode when not idle */}
             {mode !== AppMode.IDLE && lessonPlan && (
-              <div className="flex items-center gap-2 text-sm">
-                <span className={`px-2 py-1 rounded-md font-medium ${
-                  lessonPlan.mode === 'technical' 
-                    ? 'bg-emerald-100 text-emerald-700' 
-                    : 'bg-indigo-100 text-indigo-700'
-                }`}>
-                  {lessonPlan.mode === 'technical' ? '🔧 Technical' : '💬 Soft Skills'}
-                </span>
-                <span className="text-slate-500 truncate max-w-xs">
-                  {lessonPlan.summary.slice(0, 50)}...
-                </span>
+              <div className="flex items-center gap-3">
+                <ModeSelector
+                  skillMode={skillMode}
+                  onModeChange={(m) => {
+                    if (confirm('Changing the mode will reload the lesson plan. Continue?')) {
+                      setSkillMode(m);
+                      const defaultPreset = m === 'soft' ? 'negotiation' : '';
+                      setSelectedPreset(defaultPreset);
+                      storage.saveSettings({ preferredMode: m });
+                      // Reload the lesson with new mode
+                      loadLesson(videoId);
+                    }
+                  }}
+                  selectedPreset={selectedPreset}
+                  onPresetChange={(p) => {
+                    setSelectedPreset(p);
+                    if (confirm('Changing the preset will reload the lesson plan. Continue?')) {
+                      loadLesson(videoId);
+                    }
+                  }}
+                  disabled={false}
+                />
               </div>
             )}
             {mode !== AppMode.IDLE && (
                 <button 
-                   onClick={() => window.location.reload()}
+                   onClick={resetApp}
                    className="text-slate-500 hover:text-slate-700 text-sm font-medium"
                 >
                    Start Over
@@ -423,7 +466,7 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           {/* Left Column: Video Player */}
-          <div className="lg:col-span-5 xl:col-span-5">
+          <div className="lg:col-span-7 xl:col-span-7">
             <div className="lg:sticky lg:top-24">
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
                 {videoId ? (
@@ -454,11 +497,16 @@ const App: React.FC = () => {
           </div>
 
           {/* Right Column: Interaction Panel with Tabs */}
-          <div className="lg:col-span-7 xl:col-span-7 flex flex-col gap-4 min-h-[600px]">
-             {lessonPlan && isTechnicalPlan(lessonPlan) && mode === AppMode.PLAN_READY ? (
+          <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4 min-h-[600px]">
+             {lessonPlan && isTechnicalPlan(lessonPlan) && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION) ? (
                <TechnicalPanel 
                  plan={lessonPlan}
                  onSeekToTimestamp={handleSeekToTimestamp}
+                 currentStopPoint={currentStopPoint}
+                 currentStopIndex={currentStopIndex}
+                 onAnswerSubmit={handleAnswerSubmit}
+                 onContinue={handleContinue}
+                 onSelectStopPoint={handleSelectStopPoint}
                />
              ) : (
                <InteractionPanel 
@@ -477,12 +525,23 @@ const App: React.FC = () => {
                   answeredQuestionIds={answeredQuestionIds}
                   skipAnswered={skipAnswered}
                   onToggleSkipAnswered={() => setSkipAnswered(!skipAnswered)}
+                  showVoiceRoleplayButton={lessonPlan ? isSoftSkillsPlan(lessonPlan) && !!lessonPlan.rolePlayPersona : false}
+                  onStartVoiceRoleplay={() => setShowVoiceRoleplay(true)}
+                  selectedScenario={selectedPreset}
                />
              )}
           </div>
 
         </div>
       </main>
+
+      {/* Voice Roleplay Modal */}
+      {showVoiceRoleplay && lessonPlan && isSoftSkillsPlan(lessonPlan) && (
+        <VoiceRoleplay
+          lessonPlan={lessonPlan}          selectedScenario={selectedPreset}          onClose={() => setShowVoiceRoleplay(false)}
+          onPauseVideo={() => setIsPlaying(false)}
+        />
+      )}
 
       {/* Footer with legal links */}
       <footer className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-slate-100 py-2 px-4 z-40">

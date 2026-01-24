@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TechnicalLessonPlan } from '../types';
 
 interface SafetyBannerProps {
@@ -7,12 +7,37 @@ interface SafetyBannerProps {
 }
 
 const SafetyBanner: React.FC<SafetyBannerProps> = ({ plan, onAcknowledge }) => {
-  const [acknowledged, setAcknowledged] = useState(false);
+  // Persist acknowledgment per video in sessionStorage
+  const storageKey = `safety_acknowledged_${plan.videoId || 'default'}`;
+  
+  const [acknowledged, setAcknowledged] = useState(() => {
+    // Check sessionStorage on mount
+    try {
+      return sessionStorage.getItem(storageKey) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Update state if plan changes (different video)
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(storageKey) === 'true';
+      setAcknowledged(stored);
+    } catch {
+      setAcknowledged(false);
+    }
+  }, [storageKey]);
 
   if (acknowledged) return null;
 
   const handleAcknowledge = () => {
     setAcknowledged(true);
+    try {
+      sessionStorage.setItem(storageKey, 'true');
+    } catch {
+      // Ignore storage errors
+    }
     onAcknowledge?.();
   };
 

@@ -33,7 +33,6 @@ export const SOFT_SKILL_PRESETS = [
   { id: 'presentation', label: 'Presentation Skills', icon: '📊', description: 'Deliver compelling presentations' },
   { id: 'feedback', label: 'Giving Feedback', icon: '💡', description: 'Provide constructive feedback to colleagues' },
   { id: 'sales', label: 'Sales Pitch', icon: '📈', description: 'Persuade clients and close deals' },
-  { id: 'custom', label: 'Custom Scenario', icon: '✏️', description: 'Define your own learning context' },
 ] as const;
 
 // ============================================
@@ -49,7 +48,6 @@ export const TECHNICAL_PROJECT_TYPES = [
   { id: 'plumbing', label: 'Plumbing/HVAC', icon: '🔧', description: 'Home repair, installations' },
   { id: 'cooking', label: 'Cooking/Baking', icon: '👨‍🍳', description: 'Recipes and techniques' },
   { id: 'crafts', label: 'DIY Crafts', icon: '🎨', description: 'Handmade projects' },
-  { id: 'custom', label: 'Other Technical', icon: '⚙️', description: 'Any technical video' },
 ] as const;
 
 // ============================================

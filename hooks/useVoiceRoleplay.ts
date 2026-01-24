@@ -10,390 +10,502 @@ export interface VoiceMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  audioBlob?: Blob;
+  emotion?: string;
+  prosodyAnalysis?: string;
 }
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionState = 'disconnected' | 'ready' | 'recording' | 'processing' | 'speaking' | 'error';
 
-// Helper to get API key
-const getApiKey = () => {
-  return (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-};
+const MAX_RECORDING_TIME = 120; // 2 minutes in seconds
+const MAX_CONVERSATION_ROUNDS = 8; // Maximum back-and-forth exchanges
 
 export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<string>('');
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [conversationRounds, setConversationRounds] = useState(0);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
-  const audioQueueRef = useRef<Float32Array[]>([]);
-  const isPlayingRef = useRef(false);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
+  const mediaStream = useRef<MediaStream | null>(null);
+  const timerInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize audio context
-  const initAudioContext = useCallback(async () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-    }
-    if (audioContextRef.current.state === 'suspended') {
-      await audioContextRef.current.resume();
-    }
-    return audioContextRef.current;
+  // Helper to convert blob to base64
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Play audio
+  const playAudio = useCallback(async (audioBlob: Blob) => {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio(URL.createObjectURL(audioBlob));
+      setIsSpeaking(true);
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audio.src);
+        resolve();
+      };
+      audio.play();
+    });
   }, []);
 
-  // Play audio from base64 PCM data
-  const playAudio = useCallback(async (base64Audio: string) => {
-    try {
-      const audioContext = await initAudioContext();
-      const binaryString = atob(base64Audio);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      
-      // Convert to Float32 (assuming 16-bit PCM)
-      const int16Array = new Int16Array(bytes.buffer);
-      const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-      }
-
-      const audioBuffer = audioContext.createBuffer(1, float32Array.length, 24000);
-      audioBuffer.getChannelData(0).set(float32Array);
-
-      const source = audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContext.destination);
-      
-      setIsSpeaking(true);
-      source.onended = () => setIsSpeaking(false);
-      source.start();
-    } catch (e) {
-      console.error('Audio playback error:', e);
-    }
-  }, [initAudioContext]);
-
-  // Connect to Gemini Live API
+  // Initialize connection (request mic access)
   const connect = useCallback(async () => {
     if (!config) {
       setError('No roleplay configuration provided');
       return;
     }
 
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      setError('Gemini API key not configured');
-      return;
-    }
-
-    setConnectionState('connecting');
+    setConnectionState('ready');
     setError(null);
 
     try {
       // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          sampleRate: 16000,
-          channelCount: 1,
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
           echoCancellation: true,
           noiseSuppression: true,
-        } 
+          sampleRate: 44100
+        }
       });
-      mediaStreamRef.current = stream;
-
-      // Connect to Gemini Live API via WebSocket
-      // Using the v1beta endpoint for Gemini 2.0
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      mediaStream.current = stream;
+      console.log('🎙️ Microphone access granted');
       
-      console.log('🎙️ Connecting to Gemini Live API...');
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('🎙️ WebSocket connected, sending setup...');
-        
-        // Send setup message - using correct format for Gemini 2.0 Live API
-        const setupMessage = {
-          setup: {
-            model: 'models/gemini-2.0-flash-exp',
-            generationConfig: {
-              responseModalities: ['TEXT'],  // Start with text only for reliability
-            },
-            systemInstruction: {
-              parts: [{
-                text: `You are playing a character in a roleplay scenario for communication skills practice.
-
-CHARACTER: ${config.persona}
-
-SCENARIO CONTEXT: ${config.scenario}
-
-VIDEO CONTEXT (what the user learned): ${config.videoContext}
-
-INSTRUCTIONS:
-- Stay in character throughout the conversation
-- Be realistic but not hostile - push back appropriately
-- After 3-5 exchanges, naturally conclude the conversation
-- At the end, briefly break character to give feedback on how the user did
-- Focus on: tone, persuasion techniques, active listening, handling objections
-
-Start with a greeting appropriate to the scenario.`
-              }]
-            }
-          }
-        };
-        
-        try {
-          ws.send(JSON.stringify(setupMessage));
-          console.log('🎙️ Setup message sent');
-        } catch (e) {
-          console.error('🎙️ Failed to send setup:', e);
-          setError('Failed to initialize session');
-          setConnectionState('error');
-          return;
-        }
-        
-        // Add initial assistant message
-        setMessages([{
-          role: 'assistant',
-          content: '(Connected - waiting for AI to start...)',
-          timestamp: new Date()
-        }]);
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          // Handle Blob data (binary) - convert to text first
-          let rawData = event.data;
-          if (rawData instanceof Blob) {
-            rawData = await rawData.text();
-          }
-          
-          const data = JSON.parse(rawData);
-          
-          // Handle server content (audio/text response)
-          if (data.serverContent) {
-            const parts = data.serverContent.modelTurn?.parts || [];
-            
-            for (const part of parts) {
-              // Handle text response
-              if (part.text) {
-                setMessages(prev => {
-                  const last = prev[prev.length - 1];
-                  if (last?.role === 'assistant' && last.content.startsWith('(')) {
-                    // Replace placeholder
-                    return [...prev.slice(0, -1), {
-                      role: 'assistant',
-                      content: part.text,
-                      timestamp: new Date()
-                    }];
-                  }
-                  return [...prev, {
-                    role: 'assistant',
-                    content: part.text,
-                    timestamp: new Date()
-                  }];
-                });
-              }
-              
-              // Handle audio response
-              if (part.inlineData?.mimeType?.includes('audio') && part.inlineData.data) {
-                playAudio(part.inlineData.data);
-              }
-            }
-            
-            // Check if turn is complete
-            if (data.serverContent.turnComplete) {
-              setIsSpeaking(false);
-            }
-          }
-          
-          // Handle setup complete
-          if (data.setupComplete) {
-            console.log('🎙️ Setup complete, ready for voice input');
-          }
-        } catch (e) {
-          console.error('WebSocket message parse error:', e);
-        }
-      };
-
-      ws.onerror = (e) => {
-        console.error('WebSocket error:', e);
-        setError('Connection error. Please try again.');
-        setConnectionState('error');
-      };
-
-      ws.onclose = (event) => {
-        console.log('🎙️ WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
-        
-        // Provide helpful error messages based on close code
-        if (event.code === 1002 || event.code === 1003) {
-          setError('Protocol error - the API may have changed. Please try again.');
-        } else if (event.code === 1008) {
-          setError('Policy violation - check your API key permissions.');
-        } else if (event.code === 4000 || event.code === 4001) {
-          setError('Invalid API key or model not available.');
-        } else if (!event.wasClean && connectionState === 'connecting') {
-          setError('Connection failed. The Gemini Live API may not be available in your region.');
-        }
-        
-        setConnectionState('disconnected');
-        setIsListening(false);
-      };
-
+      // Add welcome message
+      setMessages([{
+        role: 'assistant',
+        content: 'Ready to practice! Click "Start Recording" to begin.',
+        timestamp: new Date()
+      }]);
+      
     } catch (e) {
-      console.error('Connection error:', e);
-      setError(e instanceof Error ? e.message : 'Failed to connect');
+      console.error('Microphone access error:', e);
+      setError('Microphone access denied. Please allow microphone access to use voice chat.');
       setConnectionState('error');
     }
-  }, [config, playAudio]);
+  }, [config]);
 
-  // Start listening (send audio to API)
-  const startListening = useCallback(async () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected');
-      return;
-    }
-
-    if (!mediaStreamRef.current) {
+  // Start recording
+  const startRecording = useCallback(async () => {
+    if (!mediaStream.current) {
       setError('No microphone access');
       return;
     }
 
+    // Check if max rounds reached
+    if (conversationRounds >= MAX_CONVERSATION_ROUNDS) {
+      setError(`Reached maximum of ${MAX_CONVERSATION_ROUNDS} exchanges. Please end the session.`);
+      return;
+    }
+
     try {
-      const audioContext = await initAudioContext();
-      const source = audioContext.createMediaStreamSource(mediaStreamRef.current);
+      audioChunks.current = [];
+      setRecordingTime(0);
       
-      // Create a script processor for audio capture
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      mediaRecorder.current = new MediaRecorder(mediaStream.current, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      mediaRecorder.current.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunks.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.current.start();
+      setIsRecording(true);
+      setConnectionState('recording');
       
-      processor.onaudioprocess = (e) => {
-        if (!isListening || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-        
-        const inputData = e.inputBuffer.getChannelData(0);
-        
-        // Resample from audioContext.sampleRate to 16000
-        const ratio = audioContext.sampleRate / 16000;
-        const outputLength = Math.floor(inputData.length / ratio);
-        const outputData = new Float32Array(outputLength);
-        
-        for (let i = 0; i < outputLength; i++) {
-          outputData[i] = inputData[Math.floor(i * ratio)];
-        }
-        
-        // Convert to 16-bit PCM
-        const pcmData = new Int16Array(outputData.length);
-        for (let i = 0; i < outputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, outputData[i]));
-          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-        
-        // Convert to base64
-        const uint8Array = new Uint8Array(pcmData.buffer);
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-          binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64Audio = btoa(binary);
-        
-        // Send audio chunk
-        const message = {
-          realtimeInput: {
-            mediaChunks: [{
-              mimeType: 'audio/pcm;rate=16000',
-              data: base64Audio
-            }]
+      // Start timer
+      timerInterval.current = setInterval(() => {
+        setRecordingTime(prev => {
+          if (prev >= MAX_RECORDING_TIME) {
+            stopRecording();
+            return prev;
           }
-        };
+          return prev + 1;
+        });
+      }, 1000);
+      
+      console.log('🎙️ Recording started');
+    } catch (e) {
+      console.error('Start recording error:', e);
+      setError('Failed to start recording');
+    }
+  }, []);
+
+  // Stop recording and process
+  const stopRecording = useCallback(async () => {
+    if (!mediaRecorder.current || !isRecording) return;
+
+    return new Promise<void>((resolve) => {
+      mediaRecorder.current!.onstop = async () => {
+        // Clear timer
+        if (timerInterval.current) {
+          clearInterval(timerInterval.current);
+          timerInterval.current = null;
+        }
         
-        wsRef.current.send(JSON.stringify(message));
+        setIsRecording(false);
+        setConnectionState('processing');
+        
+        try {
+          // Create audio blob
+          const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
+          console.log('🎙️ Audio recorded, size:', audioBlob.size);
+          
+          // Import the analysis function
+          const { analyzeVoiceAndRespond } = await import('../services/geminiService');
+          
+          // Send to Gemini for analysis
+          const result = await analyzeVoiceAndRespond(
+            audioBlob,
+            config!,
+            messages
+          );
+          
+          // Add user message
+          setMessages(prev => [...prev, {
+            role: 'user',
+            content: result.userTranscript || '(Audio message)',
+            audioBlob: audioBlob,
+            prosodyAnalysis: result.prosodyAnalysis,
+            timestamp: new Date()
+          }]);
+          
+          // Add assistant message
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: result.responseText,
+            emotion: result.emotionalTone,
+            timestamp: new Date()
+          }]);
+          
+          // Play voice response with emotion using TTS
+          setConnectionState('speaking');
+          await textToSpeechWithEmotion(result.responseText, result.emotionalTone);
+          setConnectionState('ready');
+          
+          // Increment conversation rounds
+          setConversationRounds(prev => prev + 1);
+          
+          // Show warning when approaching limit
+          if (conversationRounds + 1 >= MAX_CONVERSATION_ROUNDS - 1) {
+            setTimeout(() => {
+              setError(`Approaching conversation limit (${conversationRounds + 1}/${MAX_CONVERSATION_ROUNDS}). Consider wrapping up.`);
+            }, 2000);
+          }
+          
+        } catch (e) {
+          console.error('Processing error:', e);
+          setError('Failed to process audio. Please try again.');
+          setConnectionState('error');
+          setTimeout(() => setConnectionState('ready'), 3000);
+        }
+        
+        resolve();
+      };
+
+      mediaRecorder.current!.stop();
+      console.log('🎙️ Recording stopped');
+    });
+  }, [isRecording, config, messages, playAudio]);
+
+  // Text-to-speech with emotion using Google Cloud TTS (with SSML prosody)
+  const textToSpeechWithEmotion = async (
+    text: string,
+    emotion: string
+  ): Promise<void> => {
+    const apiKey = (import.meta as any).env?.VITE_GOOGLE_TTS_API_KEY;
+    
+    // Fallback to browser TTS if no API key
+    if (!apiKey) {
+      console.warn('No Google TTS API key found, using browser TTS');
+      return textToSpeechBrowserFallback(text, emotion);
+    }
+
+    try {
+      // Detect gender from persona for appropriate voice selection
+      const persona = config?.persona || '';
+      const isFemale = /\b(she|her|woman|female|girl|lady|ms\.|mrs\.|miss)\b/i.test(persona);
+      const isMale = /\b(he|him|man|male|boy|gentleman|mr\.|sir)\b/i.test(persona);
+      
+      // Select voice based on persona gender
+      let voiceName = 'en-US-Neural2-F'; // Default female
+      
+      if (isMale && !isFemale) {
+        // Male persona detected
+        voiceName = 'en-US-Neural2-J'; // Male, casual/friendly
+      } else if (persona.toLowerCase().includes('professional') || persona.toLowerCase().includes('executive')) {
+        // Professional context
+        voiceName = isMale ? 'en-US-Neural2-A' : 'en-US-Neural2-F'; // Formal voices
+      }
+      
+      console.log(`🎭 Detected persona: ${persona.slice(0, 50)}...`);
+      console.log(`🔊 Selected voice: ${voiceName} (${isMale ? 'male' : 'female'})`);
+      
+      // Map emotion to SSML prosody attributes
+      let rate = '100%'; // normal
+      let pitch = '+0st'; // semitones
+      let volume = 'medium';
+      
+      switch (emotion) {
+        case 'impatient':
+        case 'frustrated':
+          rate = '110%';
+          pitch = '+3st';
+          volume = 'medium';
+          break;
+        case 'grateful':
+        case 'friendly':
+          rate = '95%';
+          pitch = '+2st';
+          volume = 'medium';
+          break;
+        case 'angry':
+        case 'dismissive':
+          rate = '105%';
+          pitch = '-2st';
+          volume = 'loud';
+          break;
+        case 'skeptical':
+        case 'curious':
+          rate = '92%';
+          pitch = '-1st';
+          volume = 'medium';
+          break;
+        default:
+          rate = '100%';
+          pitch = '+0st';
+          volume = 'medium';
+      }
+      
+      // Build SSML with prosody
+      const ssml = `<speak><prosody rate="${rate}" pitch="${pitch}" volume="${volume}">${text}</prosody></speak>`;
+      
+      // Call Google Cloud TTS API
+      const response = await fetch(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: { ssml },
+            voice: {
+              languageCode: 'en-US',
+              name: voiceName, // Dynamic voice selection based on persona
+            },
+            audioConfig: {
+              audioEncoding: 'MP3',
+              speakingRate: 1.0,
+              pitch: 0.0,
+            },
+          }),
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`TTS API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const audioContent = data.audioContent; // base64 encoded MP3
+      
+      // Convert base64 to blob and play
+      const audioBlob = base64ToBlob(audioContent, 'audio/mp3');
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      return new Promise((resolve, reject) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+          console.log('🔊 Google TTS finished');
+          resolve();
+        };
+        audio.onerror = (err) => {
+          URL.revokeObjectURL(audioUrl);
+          console.error('🔊 Audio playback error:', err);
+          reject(err);
+        };
+        console.log('🔊 Playing Google TTS with emotion:', emotion);
+        audio.play();
+      });
+      
+    } catch (err) {
+      console.error('🔊 Google TTS error, falling back to browser TTS:', err);
+      return textToSpeechBrowserFallback(text, emotion);
+    }
+  };
+  
+  // Helper: Convert base64 to Blob
+  const base64ToBlob = (base64: string, mimeType: string): Blob => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  };
+  
+  // Fallback: Browser TTS (lower quality)
+  const textToSpeechBrowserFallback = async (
+    text: string,
+    emotion: string
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Detect gender for voice selection
+      const persona = config?.persona || '';
+      const isMale = /\b(he|him|man|male|boy|gentleman|mr\.|sir)\b/i.test(persona);
+      
+      // Select a better voice if available
+      const voices = window.speechSynthesis.getVoices();
+      let selectedVoice;
+      
+      if (isMale) {
+        // Prefer male voices
+        selectedVoice = voices.find(v => 
+          v.lang.startsWith('en') && 
+          (v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('david') || v.name.toLowerCase().includes('james'))
+        ) || voices.find(v => 
+          v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
+        );
+      } else {
+        // Prefer female voices
+        selectedVoice = voices.find(v => 
+          v.lang.startsWith('en') && 
+          (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('samantha') || v.name.toLowerCase().includes('zira'))
+        ) || voices.find(v => 
+          v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
+        );
+      }
+      
+      if (!selectedVoice) {
+        selectedVoice = voices.find(v => v.lang.startsWith('en'));
+      }
+      
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+        console.log(`🔊 Browser TTS voice: ${selectedVoice.name}`);
+      }
+      
+      // Adjust prosody based on emotion
+      switch (emotion) {
+        case 'impatient':
+        case 'frustrated':
+          utterance.rate = 1.2;
+          utterance.pitch = 1.15;
+          utterance.volume = 0.9;
+          break;
+        case 'grateful':
+        case 'friendly':
+          utterance.rate = 0.95;
+          utterance.pitch = 1.1;
+          utterance.volume = 1.0;
+          break;
+        case 'angry':
+        case 'dismissive':
+          utterance.rate = 1.1;
+          utterance.pitch = 0.85;
+          utterance.volume = 0.95;
+          break;
+        case 'skeptical':
+        case 'curious':
+          utterance.rate = 0.92;
+          utterance.pitch = 0.95;
+          utterance.volume = 0.9;
+          break;
+        default:
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+      }
+      
+      utterance.onend = () => {
+        console.log('🔊 TTS finished');
+        resolve();
       };
       
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+      utterance.onerror = (err) => {
+        console.error('🔊 TTS error:', err);
+        reject(err);
+      };
       
-      audioWorkletRef.current = processor as any;
-      setIsListening(true);
-      setTranscript('');
-      
-    } catch (e) {
-      console.error('Start listening error:', e);
-      setError('Failed to start microphone');
-    }
-  }, [initAudioContext, isListening]);
-
-  // Stop listening
-  const stopListening = useCallback(() => {
-    setIsListening(false);
-    
-    if (audioWorkletRef.current) {
-      audioWorkletRef.current.disconnect();
-      audioWorkletRef.current = null;
-    }
-    
-    // Add user message placeholder if we have a transcript
-    if (transcript) {
-      setMessages(prev => [...prev, {
-        role: 'user',
-        content: transcript || '(Voice message)',
-        timestamp: new Date()
-      }]);
-      setTranscript('');
-    }
-  }, [transcript]);
+      console.log('🔊 Speaking with emotion:', emotion);
+      window.speechSynthesis.speak(utterance);
+    });
+  };
 
   // Disconnect
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    if (mediaStream.current) {
+      mediaStream.current.getTracks().forEach(track => track.stop());
+      mediaStream.current = null;
     }
     
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
     }
     
     setConnectionState('disconnected');
-    setIsListening(false);
+    setIsRecording(false);
     setIsSpeaking(false);
     setMessages([]);
     setError(null);
+    setRecordingTime(0);
+    setConversationRounds(0);
   }, []);
 
   // Send text message (fallback)
-  const sendTextMessage = useCallback((text: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected');
-      return;
-    }
-    
-    setMessages(prev => [...prev, {
+  const sendTextMessage = useCallback(async (text: string) => {
+    // Create the new user message
+    const userMessage: VoiceMessage = {
       role: 'user',
       content: text,
       timestamp: new Date()
-    }]);
-    
-    const message = {
-      clientContent: {
-        turns: [{
-          role: 'user',
-          parts: [{ text }]
-        }],
-        turnComplete: true
-      }
     };
     
-    wsRef.current.send(JSON.stringify(message));
-  }, []);
+    setMessages(prev => [...prev, userMessage]);
+    
+    // Build conversation history including the new message
+    const historyWithNewMessage = [
+      ...messages.map(m => ({ role: m.role, content: m.content })),
+      { role: 'user' as const, content: text }
+    ];
+    
+    // Get AI response
+    const { roleplayChat } = await import('../services/geminiService');
+    const response = await roleplayChat(
+      config!.persona,
+      config!.scenario,
+      config!.videoContext,
+      historyWithNewMessage
+    );
+    
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: response,
+      timestamp: new Date()
+    }]);
+  }, [config, messages]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -404,15 +516,18 @@ Start with a greeting appropriate to the scenario.`
 
   return {
     connectionState,
-    isListening,
+    isRecording,
     isSpeaking,
     messages,
     error,
-    transcript,
+    recordingTime,
+    maxRecordingTime: MAX_RECORDING_TIME,
+    conversationRounds,
+    maxConversationRounds: MAX_CONVERSATION_ROUNDS,
     connect,
     disconnect,
-    startListening,
-    stopListening,
+    startRecording,
+    stopRecording,
     sendTextMessage,
   };
 };

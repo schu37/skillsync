@@ -72,11 +72,13 @@ Skillsync/
 │
 ├── components/
 │   ├── VideoPlayer.tsx     # YouTube iframe + timeline markers
-│   ├── InteractionPanel.tsx # Q&A interaction, lesson plan view
+│   ├── InteractionPanel.tsx # Q&A, Notes, Chat tabs (soft skills mode)
 │   ├── ModeSelector.tsx    # Soft/Technical mode toggle
-│   ├── TechnicalPanel.tsx  # Parts, tools, build steps (technical mode)
+│   ├── TechnicalPanel.tsx  # Overview, Parts, Tools, Steps, Why?, Q&A, Notes, Chat (technical mode)
 │   ├── SafetyBanner.tsx    # Disclaimer for technical projects
-│   └── VoiceRoleplay.tsx   # [TODO] Voice conversation UI
+│   ├── NotesSection.tsx    # Note-taking with auto-save
+│   ├── VideoChatSection.tsx # AI chat about video content
+│   └── VoiceRoleplay.tsx   # Voice conversation UI with prosody analysis
 │
 ├── services/
 │   ├── geminiService.ts    # All Gemini API calls
@@ -107,9 +109,16 @@ Skillsync/
 | API Logging (Debug) | ✅ Done | P1 | Console group logs |
 | **Video Caching** | ✅ Done | P1 | 7-day TTL, per URL+mode |
 | **Markdown Export** | ✅ Done | P1 | Download full session |
-| **Google Docs Export** | ✅ Done | P1 | OAuth flow implemented |
-| **Question-Specific Scoring** | ✅ Done | P1 | Each question has measurable criteria |
-| **Voice Roleplay** | ✅ Done | P1 | Gemini Live API integration |
+| **Google Docs Export** | ✅ Done | P1 | OAuprosody analysis integration |
+| **Voice Roleplay in Chat** | ✅ Done | P1 | Integrated into Roleplay tab |
+| **Sticky Tabs** | ✅ Done | P1 | Q&A/Notes/Chat tabs always visible |
+| **Mode Switching** | ✅ Done | P1 | Change soft/technical after video load |
+| **Unified Notes** | ✅ Done | P1 | Single notes area with AI toggle |
+| **Tab State Persistence** | ✅ Done | P1 | Switching tabs preserves content |
+| **Technical Mode Parity** | ✅ Done | P1 | Q&A, Notes, Chat in technical mode |
+| **Safety Banner Persistence** | ✅ Done | P1 | No auto-play for technical projects |
+| **Mode Switching** | ✅ Done | P1 | Change soft/technical after video load |
+| **Unified Notes** | ✅ Done | P1 | Single notes area with AI toggle |
 | Study Pack Generation | ✅ Done | P2 | Markdown summary |
 | Safety Disclaimer | ✅ Done | P2 | User acknowledgment |
 | Google Sheets Export | 🔨 Partial | P2 | Parts list export |
@@ -148,12 +157,26 @@ Questions are generated based on video content, not fixed limits:
 
 ## 🧠 Gemini API Integration
 
+### Gemini 3 Showcase - Key Features Used
+
+This project leverages **Gemini 3's cutting-edge capabilities** to transform video learning:
+
+| Feature | How We Use It | Why It's Powerful |
+|---------|--------------|-------------------|
+| 🎥 **Native Video Understanding** | Direct YouTube URL input via `fileData.fileUri` | No preprocessing/transcription needed - Gemini "watches" the video |
+| 🎯 **Multimodal Analysis** | Processes video, audio, visual demonstrations simultaneously | Understands context from speech, on-screen text, and physical actions |
+| 🔍 **Grounding with Google Search** | Real-time web search during analysis | Validates technical specs, finds related tutorials, fact-checks |
+| 📊 **Structured Output** | JSON Schema validation for all responses | Type-safe, predictable data - no parsing errors |
+| 🎤 **Audio Prosody Analysis** | Analyzes tone, pace, volume, emotion from voice input | Evaluates soft skills beyond just words - captures HOW you speak |
+| 🧠 **Long Context Window** | 2M token capacity | Processes entire long-form videos without splitting |
+| 🎨 **Spatial Understanding** | Analyzes visual demonstrations in DIY videos | Identifies tools, parts, hand movements, safety hazards |
+| 🚫 **Educational Content Detection** | Filters out non-educational videos | Ensures quality learning experiences |
+
 ### Models Used
 
 | Model | Use Case | Why |
 |-------|----------|-----|
-| `gemini-3-flash-preview` | Video analysis, Q&A | Native video understanding, structured output |
-| `gemini-2.0-flash-live-001` | Voice roleplay | Real-time bidirectional audio |
+| `gemini-3-flash-preview` | Video analysis, Q&A, voice roleplay | Native video understanding, audio analysis with prosody, structured output |
 
 ### Native Video Input
 
@@ -239,21 +262,35 @@ const { spreadsheetUrl } = await exportPartsToGoogleSheets(technicalPlan, access
 ## 🎙️ Voice Roleplay Design
 
 ### Use Case
-User practices communication scenarios by speaking with Gemini in character.
+User practices communication scenarios by speaking with Gemini in character. The system analyzes vocal prosody (tone, volume, pace, emotion) to provide realistic soft skills practice.
 
-### Architecture
+### Architecture (Turn-Based)
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────┐
-│   Browser   │────▶│  WebSocket  │────▶│  Gemini Live    │
-│  Microphone │◀────│  Connection │◀────│  API (2.0)      │
-└─────────────┘     └─────────────┘     └─────────────────┘
-      │                                         │
-      ▼                                         ▼
-┌─────────────┐                         ┌─────────────────┐
-│   Speaker   │                         │  Roleplay       │
-│   Output    │                         │  Persona Config │
-└─────────────┘                         └─────────────────┘
+┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Browser   │────▶│  MediaRecorder  │────▶│  Gemini 3 Flash │
+│  Microphone │     │  (audio/webm)   │     │  (Audio Input)  │
+└─────────────┘     └─────────────────┘     └─────────────────┘
+      │                                              │
+      │                                              ▼
+      │                                     ┌─────────────────┐
+      │                                     │ Prosody Analysis│
+      │                                     │ - Tone detection│
+      │                                     │ - Volume level  │
+      │                                     │ - Speech pace   │
+      │                                     │ - Emotion       │
+      │                                     └────────┬────────┘
+      │                                              │
+      │                                              ▼
+      │                                     ┌─────────────────┐
+      │                                     │  AI Response    │
+      │                                     │  with Emotion   │
+      │                                     └────────┬────────┘
+      ▼                                              │
+┌─────────────┐                                     │
+│  Speaker    │◀────────────────────────────────────┘
+│  (Web TTS)  │  Adjusted rate/pitch for emotion
+└─────────────┘
 ```
 
 ### Persona Configuration
@@ -275,11 +312,30 @@ const ROLEPLAY_PERSONAS = [
 ];
 ```
 
-### Implementation Plan
+### Implementation Status
 
-1. **Phase 1**: Text-based roleplay (type responses)
-2. **Phase 2**: Voice input via Web Speech API (already built: `useVoiceInput`)
-3. **Phase 3**: Full duplex voice via Gemini Live API
+✅ **Completed**: Turn-based voice roleplay with prosody analysis
+- Click-to-record interface with 2-minute timer
+- Audio captured via MediaRecorder API (audio/webm;codecs=opus)
+- Gemini analyzes audio for prosody: tone, volume, pace, emotion
+- AI responds with emotional context
+- Text-to-Speech output with adjusted prosody (rate/pitch)
+- Text chat fallback mode available
+
+### Why Turn-Based vs Real-Time?
+
+**Turn-based approach chosen because:**
+1. Gemini can analyze actual audio prosody (not just transcription)
+2. More reliable evaluation of soft skills performance
+3. No WebSocket complexity or connection issues
+4. Better for asynchronous processing of emotional context
+5. Supports both voice and text modes seamlessly
+
+**Real-time Live API limitations:**
+- Only transcribes to text (loses prosody information)
+- Cannot analyze tone, volume, or emotional delivery
+- Requires persistent WebSocket connection
+- ScriptProcessorNode deprecation issues
 
 ---
 
@@ -367,7 +423,7 @@ Add "Open in NotebookLM" button that:
 
 ### Development
 ```bash
-npm run dev  # Vite dev server on :3000
+npm run dev  # Vite dev server on :3001
 ```
 
 ### Production
@@ -378,9 +434,28 @@ npm run build  # Output to dist/
 
 ### Environment Variables
 ```env
-VITE_GEMINI_API_KEY=xxx        # Required - Gemini API key
-VITE_GOOGLE_CLIENT_ID=xxx      # Required for Google Docs export
+VITE_GEMINI_API_KEY=xxx              # Required - Gemini API key
+VITE_GOOGLE_CLIENT_ID=xxx            # Required for Google Docs export
+VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better voice)
 ```
+
+### Setting Up Google Cloud Text-to-Speech (Optional)
+
+**For professional-quality voice output in roleplay:**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing
+3. Enable **Cloud Text-to-Speech API**
+4. Go to **Credentials** → **Create Credentials** → **API Key**
+5. Restrict the API key to Text-to-Speech API only (recommended)
+6. Copy the API key to `.env.local` as `VITE_GOOGLE_TTS_API_KEY`
+
+**Pricing**: ~$4 per 1 million characters (Neural2 voices)
+- Typical roleplay response: 100-200 characters
+- Cost per response: ~$0.0004-0.0008 (less than 1/10th of a cent)
+- Very affordable for hackathon demo
+
+**Without API key**: Falls back to free browser TTS (lower quality)
 
 ### Setting Up Google OAuth Client ID
 
@@ -412,14 +487,19 @@ VITE_GOOGLE_CLIENT_ID=xxx      # Required for Google Docs export
 ### Bugs
 - [ ] YouTube Shorts may have playback issues in some browsers
 - [ ] Long videos (>30min) may timeout on analysis
-
-### TODOs
-- [x] ~~Add video caching (same URL → reuse results)~~
-- [x] ~~Wire up "Export to Google Docs" button in UI~~
-- [x] ~~Add question-specific scoring criteria~~
-- [ ] Implement voice roleplay with Gemini Live API
+- [x] ~~Implement voice roleplay with prosody analysis~~
+- [x] ~~Add typing chat about the video with gemini~~
+- [x] ~~Make tabs sticky and always visible~~
+- [x] ~~Allow mode switching after video load~~
+- [x] ~~Unify notes section with AI toggle~~
+- [x] ~~Fix tab state reset when switching between tabs~~
+- [x] ~~Add Q&A, Notes, Chat to Technical Mode~~
+- [x] ~~Fix Safety Banner persistence and auto-play~~
+- [x] ~~Fix Start Over to reset skill mode properly~~
 - [ ] Add progress persistence (resume sessions)
-- [ ] Add typing chat about the video with gemini
+- [ ] Mobile responsive improvements
+- [ ] Create nodes and trees or flow charts about how each knowledge points are interconnected
+- [ ] Add progress persistence (resume sessions)
 - [ ] Mobile responsive improvements
 
 ### TODOs
@@ -427,6 +507,98 @@ VITE_GOOGLE_CLIENT_ID=xxx      # Required for Google Docs export
 ---
 
 ## 📝 Changelog
+
+### v0.6.2 (2026-01-25)
+- **Tab State Persistence**: Fixed state reset bug when switching between Q&A, Notes, and Chat tabs
+  - All tabs now stay mounted (using CSS `hidden` instead of conditional rendering)
+  - Chat messages, notes content, and input fields preserved when switching tabs
+  - Same fix applied to both InteractionPanel and TechnicalPanel
+- **Video Display Enlargement**: Increased video area from 5 to 7 columns (out of 12-column grid)
+  - Video now takes ~58% of width instead of ~42%
+  - Better viewing experience for tutorials and demonstrations
+  - Interaction panel adjusted to 5 columns
+- **Safety Banner Persistence**: Fixed banner disappearing issues in Technical Mode
+  - Removed auto-play for technical projects (users must manually start)
+  - TechnicalPanel now visible in PLAN_READY, PLAYING, and PAUSED_INTERACTION modes
+  - Safety banner remains visible until user acknowledges
+  - Soft skills mode still auto-plays after 1.5 seconds
+- **Technical Mode Feature Parity**: Added Q&A, Notes, and Chat tabs to Technical Mode
+  - Technical projects now have 8 tabs: Overview, Parts, Tools, Steps, Why?, Q&A, Notes, Chat
+  - Same interactive learning features as Soft Skills mode
+  - Chat focuses on technical discussion (no roleplay option)
+  - Q&A tab shows comprehension questions with video timestamps
+  - All tab states preserved when switching (same as Soft Skills mode)
+- **Start Over Fix**: Proper state reset instead of page reload
+  - "Start Over" button now resets all state programmatically
+  - Skill mode resets to default 'soft' instead of persisting previous selection
+  - No more loading from localStorage on reset
+  - Cleaner user experience when starting with new video
+
+### v0.6.1 (2026-01-24)
+- **Voice Roleplay Refactor**: Complete redesign from Live API to turn-based prosody analysis
+  - Changed from "hold to speak" to click-to-start/stop recording
+  - Added 2-minute recording timer with countdown display
+  - Gemini now analyzes actual audio for tone, volume, pace, emotion
+  - AI responses include emotional context
+  - TTS output adjusted for emotional prosody (rate/pitch modulation)
+  - Messages display prosody analysis and emotional tone
+  - More reliable than WebSocket-based real-time approach
+  - Better soft skills evaluation through true audio analysis
+- **Dynamic Scenario Switching**: Scenario dropdown now updates roleplay context in real-time
+  - Change scenario without re-analyzing the video
+  - Experiment with different roleplay contexts instantly
+  - Selected scenario overrides auto-detected scenario from video analysis
+- **Conversation Round Limiting**: Added 8-round maximum for structured practice
+  - Prevents endless conversations
+  - Shows round counter (e.g., "Round 3/8")
+  - Warning when approaching limit
+  - Automatic session completion at 8 exchanges
+  - Encourages focused, goal-oriented practice
+- **Google Cloud Text-to-Speech Integration**: Professional-quality voice with SSML prosody
+  - Neural2 voices for natural-sounding speech
+  - **Automatic gender detection**: Analyzes persona description for gender pronouns
+    - Male personas (he/him/man/Mr.) → Male voice (en-US-Neural2-J)
+    - Female personas (she/her/woman/Ms.) → Female voice (en-US-Neural2-F)
+    - Browser TTS fallback also respects gender detection
+  - SSML-based prosody control (rate, pitch, volume) based on emotion
+  - Automatic fallback to browser TTS if API key not configured
+  - Cost: ~$4 per 1 million characters (very affordable)
+  - Emotions mapped to specific prosody patterns:
+    - Impatient/Frustrated: faster rate, higher pitch
+    - Grateful/Friendly: slower rate, warm pitch
+    - Angry/Dismissive: loud volume, lower pitch
+    - Skeptical/Curious: measured pace, slight pitch drop
+  - Setup: Add `VITE_GOOGLE_TTS_API_KEY` to `.env.local`
+- **Text Chat Fix**: Resolved closure bug where user messages weren't included in conversation history
+
+### v0.6.0 (2026-01-23)
+- **Sticky Tabs**: Q&A, Notes, and Chat tabs now stay visible while scrolling
+  - Tabs use `sticky top-0 z-10` positioning
+  - Discuss Video and Roleplay sub-tabs also sticky
+  - Improved navigation experience
+- **Dynamic Mode Switching**: Users can now change between Soft Skills and Technical modes after loading a video
+  - Mode selector always visible in navbar
+  - Prompts for confirmation before reloading lesson plan
+  - Useful for videos that cover both types of content
+- **Unified Notes Section**: Redesigned notes UI with single area
+  - User notes always visible and editable
+  - AI-generated notes show/hide with toggle button
+  - AI notes only generate when user clicks button (not automatic)
+  - Collapsible AI notes section above user notes
+  - Auto-save for user notes preserved
+- **Voice Roleplay Integration**: Voice chat now accessible from Roleplay tab
+  - "Start Voice Roleplay" button in Roleplay chat mode
+  - Opens VoiceRoleplay modal with full voice capabilities
+  - Text chat fallback available in same interface
+  - Full persona and scenario descriptions visible
+- **Content Filtering**: Chat limited to video-related topics only
+  - System prompt enforces discussion about video content
+  - Redirects off-topic questions back to learning material
+- **Markdown Rendering**: Chat messages now properly render markdown
+  - `**bold**`, `*italic*`, `` `code` `` display correctly
+  - No more raw markdown syntax showing in messages
+- **URL Input Improvement**: Video URL input now trims whitespace automatically
+  - Prevents errors from accidental spaces when pasting
 
 ### v0.5.1 (2026-01-22)
 - **Legal Compliance**: Added Privacy Policy, Terms of Service, and AI Disclaimer

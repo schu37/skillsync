@@ -1,9 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LessonPlan, isSoftSkillsPlan } from '../types';
 import { videoChatMessage, roleplayChat } from '../services/geminiService';
+import { ROLEPLAY_PERSONAS, SOFT_SKILL_PRESETS } from '../constants';
+
+// Simple markdown renderer for chat messages
+const renderMarkdown = (text: string) => {
+  // Convert **bold** to <strong>
+  let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Convert *italic* to <em>
+  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  // Convert `code` to <code>
+  formatted = formatted.replace(/`(.*?)`/g, '<code class="bg-slate-100 px-1 rounded text-sm">$1</code>');
+  return formatted;
+};
 
 interface VideoChatSectionProps {
   lessonPlan: LessonPlan;
+  selectedScenario?: string; // NEW: user-selected scenario from dropdown
+  onStartVoiceRoleplay?: () => void; // NEW: callback to open voice roleplay modal
 }
 
 type ChatMode = 'discuss' | 'roleplay';
@@ -14,7 +28,7 @@ interface Message {
   timestamp: Date;
 }
 
-const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
+const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan, selectedScenario, onStartVoiceRoleplay }) => {
   const [chatMode, setChatMode] = useState<ChatMode>('discuss');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -52,11 +66,32 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
       let response: string;
 
       if (chatMode === 'roleplay' && isSoftSkillsPlan(lessonPlan)) {
+        // Use selected scenario if available, otherwise fall back to lesson plan
+        const scenarioId = selectedScenario || lessonPlan.scenarioPreset || '';
+        const personaData = ROLEPLAY_PERSONAS[scenarioId as keyof typeof ROLEPLAY_PERSONAS];
+        const presetData = SOFT_SKILL_PRESETS.find(p => p.id === scenarioId);
+        
+        // Build persona description from ROLEPLAY_PERSONAS if available
+        const persona = personaData 
+          ? `${personaData.name}, ${personaData.role}. Style: ${personaData.style}. Initial position: ${personaData.initialPosition}`
+          : lessonPlan.rolePlayPersona || 'Professional colleague';
+        
+        // Build scenario description
+        const scenario = presetData
+          ? `${presetData.label}: ${presetData.description}`
+          : lessonPlan.scenarioPreset || 'Professional conversation';
+        
+        // Include the user's new message in history
+        const historyWithNewMessage = [
+          ...messages.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user' as const, content: userMessage }
+        ];
+        
         response = await roleplayChat(
-          lessonPlan.rolePlayPersona || 'Professional colleague',
-          lessonPlan.scenarioPreset || 'Professional conversation',
+          persona,
+          scenario,
           lessonPlan.videoContext || lessonPlan.summary,
-          messages.map(m => ({ role: m.role, content: m.content }))
+          historyWithNewMessage
         );
       } else {
         response = await videoChatMessage(
@@ -92,8 +127,8 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-      {/* Header */}
-      <div className="p-4 border-b border-slate-100 bg-slate-50">
+      {/* Header - Sticky */}
+      <div className="sticky top-0 z-10 p-4 border-b border-slate-100 bg-slate-50">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
             <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -138,10 +173,12 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
         </div>
 
         {/* Mode description */}
-        <p className="text-xs text-slate-500 mt-2">
+        <p className="text-xs text-slate-500 mt-2 leading-relaxed">
           {chatMode === 'discuss' 
-            ? 'Ask questions about the video content'
-            : `Practice with: ${isSoftSkillsPlan(lessonPlan) ? lessonPlan.rolePlayPersona?.slice(0, 50) : ''}...`
+            ? 'Ask questions about the video content and related topics only'
+            : isSoftSkillsPlan(lessonPlan) 
+              ? `Practice with: ${lessonPlan.rolePlayPersona}`
+              : 'Text-based roleplay practice'
           }
         </p>
       </div>
@@ -159,6 +196,26 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
                 : "Start a roleplay conversation to practice your skills"
               }
             </p>
+            
+            {/* Voice Roleplay Button for roleplay mode */}
+            {chatMode === 'roleplay' && hasRoleplay && onStartVoiceRoleplay && (
+              <div className="mt-6">
+                <button
+                  onClick={onStartVoiceRoleplay}
+                  className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 mx-auto shadow-lg hover:shadow-xl"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                  Start Voice Roleplay
+                </button>
+                <p className="text-xs text-slate-400 mt-2">Practice with voice interaction (recommended)</p>
+                <div className="mt-4 text-xs text-slate-400">
+                  <p className="mb-2">Or use text chat below:</p>
+                </div>
+              </div>
+            )}
+            
             <div className="mt-4 flex flex-wrap gap-2 justify-center">
               {chatMode === 'discuss' ? (
                 <>
@@ -201,7 +258,10 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan }) => {
                   : 'bg-slate-100 text-slate-800 rounded-bl-sm'
               }`}
             >
-              <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+              <div 
+                className="text-sm whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+              />
               <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-200' : 'text-slate-400'}`}>
                 {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>

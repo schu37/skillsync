@@ -5,14 +5,15 @@ import { roleplayChat } from '../services/geminiService';
 
 interface VoiceRoleplayProps {
   lessonPlan: SoftSkillsLessonPlan;
+  selectedScenario?: string;  // Dynamic scenario from dropdown (overrides lessonPlan.scenarioPreset)
   onClose: () => void;
   onPauseVideo?: () => void;  // NEW: pause video when roleplay starts
 }
 
-const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPauseVideo }) => {
+const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScenario, onClose, onPauseVideo }) => {
   const [textInput, setTextInput] = useState('');
   const [useTextMode, setUseTextMode] = useState(false);
-  const [useFallbackChat, setUseFallbackChat] = useState(false);  // Fallback text chat mode
+  const [useFallbackChat, setUseFallbackChat] = useState(false);
   const [fallbackMessages, setFallbackMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([]);
   const [isLoadingFallback, setIsLoadingFallback] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -21,6 +22,68 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
   useEffect(() => {
     onPauseVideo?.();
   }, [onPauseVideo]);
+
+  // Build config from lesson plan
+  // Use selectedScenario from dropdown if provided, otherwise use detected scenarioPreset
+  const config: VoiceRoleplayConfig = {
+    persona: lessonPlan.rolePlayPersona || 'A professional colleague who is skeptical but fair',
+    scenario: selectedScenario || lessonPlan.scenarioPreset || 'Professional conversation practice',
+    videoContext: lessonPlan.videoContext || lessonPlan.summary,
+  };
+
+  const {
+    connectionState,
+    isRecording,
+    isSpeaking,
+    messages,
+    error,
+    recordingTime,
+    maxRecordingTime,
+    conversationRounds,
+    maxConversationRounds,
+    connect,
+    disconnect,
+    startRecording,
+    stopRecording,
+    sendTextMessage,
+  } = useVoiceRoleplay(config);
+
+  // Auto-scroll messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (textInput.trim()) {
+      sendTextMessage(textInput.trim());
+      setTextInput('');
+    }
+  };
+
+  // Format time as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getStatusIcon = (state: ConnectionState) => {
+    switch (state) {
+      case 'ready':
+        return <span className="w-3 h-3 bg-green-500 rounded-full" />;
+      case 'recording':
+        return <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />;
+      case 'processing':
+        return <span className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse" />;
+      case 'speaking':
+        return <span className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />;
+      case 'error':
+        return <span className="w-3 h-3 bg-red-500 rounded-full" />;
+      default:
+        return <span className="w-3 h-3 bg-slate-400 rounded-full" />;
+    }
+  };
 
   // Handle fallback text chat submission
   const handleFallbackSubmit = async (e: React.FormEvent) => {
@@ -79,52 +142,6 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
     }
   };
 
-  // Build config from lesson plan
-  const config: VoiceRoleplayConfig = {
-    persona: lessonPlan.rolePlayPersona || 'A professional colleague who is skeptical but fair',
-    scenario: lessonPlan.scenarioPreset || 'Professional conversation practice',
-    videoContext: lessonPlan.videoContext || lessonPlan.summary,
-  };
-
-  const {
-    connectionState,
-    isListening,
-    isSpeaking,
-    messages,
-    error,
-    connect,
-    disconnect,
-    startListening,
-    stopListening,
-    sendTextMessage,
-  } = useVoiceRoleplay(config);
-
-  // Auto-scroll messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const handleTextSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (textInput.trim()) {
-      sendTextMessage(textInput.trim());
-      setTextInput('');
-    }
-  };
-
-  const getStatusIcon = (state: ConnectionState) => {
-    switch (state) {
-      case 'connected':
-        return <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />;
-      case 'connecting':
-        return <span className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse" />;
-      case 'error':
-        return <span className="w-3 h-3 bg-red-500 rounded-full" />;
-      default:
-        return <span className="w-3 h-3 bg-slate-400 rounded-full" />;
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -137,9 +154,9 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-white">Voice Roleplay Practice</h2>
-                <p className="text-sm text-white/80 truncate max-w-xs">{config.persona.slice(0, 50)}...</p>
+                <p className="text-sm text-white/80 line-clamp-2 leading-tight">{config.persona}</p>
               </div>
             </div>
             <button
@@ -152,22 +169,45 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
             </button>
           </div>
           
-          {/* Connection status - only show for voice mode */}
+          {/* Connection status */}
           {!useFallbackChat && (
-            <div className="flex items-center gap-2 mt-3">
-              {getStatusIcon(connectionState)}
-              <span className="text-sm text-white/90 capitalize">{connectionState}</span>
-              {isSpeaking && (
-                <span className="text-sm text-white/90 flex items-center gap-1">
-                  <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                  AI Speaking...
+            <div className="flex items-center gap-3 mt-3">
+              <div className="flex items-center gap-2">
+                {getStatusIcon(connectionState)}
+                <span className="text-sm text-white/90 capitalize">
+                  {connectionState === 'ready' ? 'Ready' : 
+                   connectionState === 'recording' ? 'Recording' :
+                   connectionState === 'processing' ? 'Processing' :
+                   connectionState === 'speaking' ? 'AI Speaking' :
+                   connectionState}
                 </span>
+              </div>
+              
+              {/* Round counter */}
+              {connectionState !== 'disconnected' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-white/70">
+                    Round {conversationRounds}/{maxConversationRounds}
+                  </span>
+                  {conversationRounds >= maxConversationRounds - 1 && (
+                    <span className="text-xs text-yellow-300 animate-pulse">
+                      ⚠️ Nearing limit
+                    </span>
+                  )}
+                </div>
               )}
-              {isListening && (
-                <span className="text-sm text-white/90 flex items-center gap-1">
-                  <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
-                  Listening...
-                </span>
+              
+              {isRecording && (
+                <div className="flex items-center gap-2 ml-auto">
+                  <span className="text-sm text-white/90 font-mono">
+                    {formatTime(recordingTime)} / {formatTime(maxRecordingTime)}
+                  </span>
+                  {recordingTime >= maxRecordingTime - 10 && (
+                    <span className="text-xs text-red-300 animate-pulse">
+                      Time limit approaching!
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -181,7 +221,7 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
 
         {/* Messages */}
         <div className="flex-1 p-4 overflow-y-auto bg-slate-50 space-y-4">
-          {/* Show welcome screen only when not in fallback and no messages */}
+          {/* Show welcome screen */}
           {!useFallbackChat && connectionState === 'disconnected' && messages.length === 0 && (
             <div className="text-center py-8">
               <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -193,9 +233,15 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
               <p className="text-sm text-slate-500 max-w-sm mx-auto mb-4">
                 Click "Start Session" to begin a voice conversation with an AI character based on the video you watched.
               </p>
-              <div className="bg-white p-4 rounded-lg border border-slate-200 text-left max-w-sm mx-auto">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Your Practice Partner:</p>
-                <p className="text-sm text-slate-700">{config.persona}</p>
+              <div className="bg-white p-4 rounded-lg border border-slate-200 text-left max-w-md mx-auto space-y-2">
+                <div>
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Your Practice Partner:</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{config.persona}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Scenario:</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{config.scenario}</p>
+                </div>
               </div>
             </div>
           )}
@@ -232,6 +278,16 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
                 }`}
               >
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                {msg.prosodyAnalysis && (
+                  <p className="text-xs mt-1 opacity-70 italic">
+                    🎤 {msg.prosodyAnalysis}
+                  </p>
+                )}
+                {msg.emotion && (
+                  <p className="text-xs mt-1 opacity-70">
+                    😊 Tone: {msg.emotion}
+                  </p>
+                )}
                 <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-200' : 'text-slate-400'}`}>
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
@@ -320,7 +376,6 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
                 {error ? 'Try Voice Again' : 'Start Voice Session'}
               </button>
               
-              {/* Text chat fallback option */}
               <button
                 onClick={startFallbackChat}
                 className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
@@ -335,54 +390,50 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
                 Voice requires microphone access. Text chat works without it.
               </p>
             </div>
-          ) : connectionState === 'connecting' ? (
-            <div className="flex items-center justify-center gap-2 py-3 text-slate-500">
-              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              Connecting...
-            </div>
           ) : (
             <div className="space-y-3">
-              {/* Voice controls */}
-              <div className="flex items-center gap-3">
-                <button
-                  onMouseDown={startListening}
-                  onMouseUp={stopListening}
-                  onMouseLeave={stopListening}
-                  onTouchStart={startListening}
-                  onTouchEnd={stopListening}
-                  disabled={isSpeaking}
-                  className={`flex-1 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                    isListening
-                      ? 'bg-red-500 text-white scale-105'
-                      : isSpeaking
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                  }`}
-                >
-                  <svg className={`w-6 h-6 ${isListening ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                  {isListening ? 'Listening... (Release to send)' : isSpeaking ? 'AI Speaking...' : 'Hold to Speak'}
-                </button>
-                
+              {/* Recording Button */}
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isSpeaking || connectionState === 'processing' || conversationRounds >= maxConversationRounds}
+                className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                  isRecording
+                    ? 'bg-red-500 hover:bg-red-600 text-white scale-105'
+                    : isSpeaking || connectionState === 'processing' || conversationRounds >= maxConversationRounds
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
+              >
+                <svg className={`w-6 h-6 ${isRecording ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                {conversationRounds >= maxConversationRounds ? 'Session Complete' :
+                 isRecording ? 'Stop Recording' : 
+                 isSpeaking ? 'AI Speaking...' :
+                 connectionState === 'processing' ? 'Processing...' :
+                 'Start Recording'}
+              </button>
+              
+              {/* Text mode toggle */}
+              <div className="flex items-center justify-between">
                 <button
                   onClick={() => setUseTextMode(!useTextMode)}
-                  className="p-3 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
-                  title="Switch to text input"
+                  className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1"
                 >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                   </svg>
+                  {useTextMode ? 'Hide text input' : 'Use text input'}
                 </button>
                 
                 <button
                   onClick={disconnect}
-                  className="p-3 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
-                  title="End session"
+                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
                 >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
+                  End Session
                 </button>
               </div>
               
@@ -395,11 +446,11 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Type your response..."
                     className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                    disabled={isSpeaking}
+                    disabled={isSpeaking || connectionState === 'processing'}
                   />
                   <button
                     type="submit"
-                    disabled={!textInput.trim() || isSpeaking}
+                    disabled={!textInput.trim() || isSpeaking || connectionState === 'processing'}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl transition-colors"
                   >
                     Send
@@ -408,7 +459,7 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, onClose, onPa
               )}
               
               <p className="text-xs text-center text-slate-500">
-                Hold the button to speak, release to send. AI will respond with voice.
+                Click to start recording. Maximum 2 minutes per message.
               </p>
             </div>
           )}
