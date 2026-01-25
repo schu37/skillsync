@@ -20,6 +20,11 @@ export const SKILL_MODES = {
     description: 'Process, tools, building, safety',
     icon: '🔧',
   },
+  others: {
+    label: 'General Content',
+    description: 'Explore any video with AI tools',
+    icon: '📺',
+  },
 } as const;
 
 // ============================================

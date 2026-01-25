@@ -73,8 +73,9 @@ Skillsync/
 ├── components/
 │   ├── VideoPlayer.tsx     # YouTube iframe + timeline markers
 │   ├── InteractionPanel.tsx # Q&A, Notes, Chat tabs (soft skills mode)
-│   ├── ModeSelector.tsx    # Soft/Technical mode toggle
+│   ├── ModeSelector.tsx    # Soft/Technical/General mode toggle
 │   ├── TechnicalPanel.tsx  # Overview, Parts, Tools, Steps, Why?, Q&A, Notes, Chat (technical mode)
+│   ├── OthersPanel.tsx     # Notes, Chat for unclassified videos (general mode)
 │   ├── SafetyBanner.tsx    # Disclaimer for technical projects
 │   ├── NotesSection.tsx    # Note-taking with auto-save
 │   ├── VideoChatSection.tsx # AI chat about video content
@@ -104,6 +105,7 @@ Skillsync/
 | **Regenerate Questions** | ✅ Done | P1 | Get different questions for same video |
 | Soft Skills Mode | ✅ Done | P0 | Communication, negotiation |
 | Technical Skills Mode | ✅ Done | P0 | Parts list, build steps |
+| **General Content Mode** | ✅ Done | P1 | Fallback for unclassified videos |
 | Timeline Markers | ✅ Done | P1 | Clickable to seek |
 | Question Click-to-Answer | ✅ Done | P1 | Jump to any question |
 | API Logging (Debug) | ✅ Done | P1 | Console group logs |
@@ -507,6 +509,27 @@ VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better v
 ---
 
 ## 📝 Changelog
+
+### v0.6.3 (2026-01-25)
+- **General Content Mode ("Others")**: Added third learning mode for videos without clear educational classification
+  - Videos that don't fit Soft Skills or Technical categories are now classified as "General Content"
+  - Instead of rejecting videos, users can still interact with Notes and Chat tools
+  - Warning banner explains the video wasn't classified as structured educational content
+  - Provides graceful fallback for edge cases and AI misclassifications
+  - Mode selector now has three options: Soft Skills, Technical, General
+- **Tab Overflow Fix**: Improved tab UI for better mobile and desktop experience
+  - Technical mode tabs (8 total) now use scrollable horizontal layout
+  - Responsive text sizing (smaller on mobile, normal on desktop)
+  - Tabs use `flex-shrink-0` to prevent squishing
+  - Better spacing and padding adjustments
+- **Mode Selector UI**: Updated to support three modes with wrapping
+  - Mode buttons wrap to multiple lines if needed
+  - Preset dropdown hidden for General Content mode (not applicable)
+  - Better responsive behavior on small screens
+- **Detection Logic Improvement**: More lenient with visual-only tutorials
+  - Updated prompts to recognize cooking demos, crafts without narration
+  - Silent how-to videos now classified instead of rejected
+  - Users can always override by selecting a mode before loading
 
 ### v0.6.2 (2026-01-25)
 - **Tab State Persistence**: Fixed state reset bug when switching between Q&A, Notes, and Chat tabs
