@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TechnicalLessonPlan, Component, Tool, BuildStep, DesignDecision, StopPoint, Evaluation } from '../types';
+import { TechnicalLessonPlan, Component, Tool, BuildStep, DesignDecision, StopPoint, Evaluation, AppMode } from '../types';
 import SafetyBanner from './SafetyBanner';
 import NotesSection from './NotesSection';
 import VideoChatSection from './VideoChatSection';
@@ -13,6 +13,8 @@ interface TechnicalPanelProps {
   onAnswerSubmit?: (answer: string, evaluation: Evaluation) => void;
   onContinue?: () => void;
   onSelectStopPoint?: (index: number) => void;
+  mode?: AppMode;
+  sessionHistory?: { question: string; answer: string; evaluation: Evaluation }[];
 }
 
 type TabId = 'overview' | 'parts' | 'tools' | 'steps' | 'design' | 'qa' | 'notes' | 'chat';
@@ -73,15 +75,15 @@ const TechnicalPanel: React.FC<TechnicalPanelProps> = ({
         <h2 className="text-lg font-bold text-slate-800 leading-tight">{plan.summary}</h2>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-100 bg-slate-50 px-2 overflow-x-auto">
+      {/* Tabs - Scrollable with better mobile support */}
+      <div className="flex border-b border-slate-100 bg-slate-50 px-2 overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`
-              flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap
-              border-b-2 transition-colors
+              flex items-center gap-1.5 px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium whitespace-nowrap
+              border-b-2 transition-colors flex-shrink-0
               ${activeTab === tab.id
                 ? 'border-indigo-500 text-indigo-600'
                 : 'border-transparent text-slate-500 hover:text-slate-700'}
@@ -124,6 +126,8 @@ const TechnicalPanel: React.FC<TechnicalPanelProps> = ({
             onContinue={onContinue}
             onSelectStopPoint={onSelectStopPoint}
             onSeekToTimestamp={onSeekToTimestamp}
+            mode={mode}
+            sessionHistory={sessionHistory}
           />
         </div>
         <div className={activeTab === 'notes' ? 'h-full' : 'hidden'}>
@@ -176,45 +180,74 @@ const OverviewTab: React.FC<{ plan: TechnicalLessonPlan }> = ({ plan }) => (
   </div>
 );
 
-const PartsTab: React.FC<{ components: Component[] }> = ({ components }) => (
-  <div className="space-y-3">
-    {components.map((part, i) => (
-      <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-slate-800">{part.name}</span>
-              {part.quantity && (
-                <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded">
-                  ×{part.quantity}
-                </span>
+const PartsTab: React.FC<{ components: Component[] }> = ({ components }) => {
+  const [copied, setCopied] = useState(false);
+
+  const copyPartsList = async () => {
+    const partsList = components.map((part, i) => {
+      let text = `${i + 1}. ${part.name}`;
+      if (part.quantity) text += ` (×${part.quantity})`;
+      if (part.specifications) text += `\n   Specs: ${part.specifications}`;
+      if (part.purpose) text += `\n   Purpose: ${part.purpose}`;
+      if (part.estimatedCost) text += `\n   Cost: ${part.estimatedCost}`;
+      if (part.alternatives && part.alternatives.length > 0) {
+        text += `\n   Alternatives: ${part.alternatives.join(', ')}`;
+      }
+      return text;
+    }).join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(partsList);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {components.map((part, i) => (
+        <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-slate-800">{part.name}</span>
+                {part.quantity && (
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded">
+                    ×{part.quantity}
+                  </span>
+                )}
+              </div>
+              {part.specifications && (
+                <p className="text-xs text-slate-500 mt-1 font-mono">{part.specifications}</p>
+              )}
+              {part.purpose && (
+                <p className="text-sm text-slate-600 mt-1">{part.purpose}</p>
               )}
             </div>
-            {part.specifications && (
-              <p className="text-xs text-slate-500 mt-1 font-mono">{part.specifications}</p>
-            )}
-            {part.purpose && (
-              <p className="text-sm text-slate-600 mt-1">{part.purpose}</p>
+            {part.estimatedCost && (
+              <span className="text-sm text-green-600 font-medium">{part.estimatedCost}</span>
             )}
           </div>
-          {part.estimatedCost && (
-            <span className="text-sm text-green-600 font-medium">{part.estimatedCost}</span>
+          {part.alternatives && part.alternatives.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-200">
+              <span className="text-xs text-slate-500">Alternatives: </span>
+              <span className="text-xs text-slate-600">{part.alternatives.join(', ')}</span>
+            </div>
           )}
         </div>
-        {part.alternatives && part.alternatives.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-slate-200">
-            <span className="text-xs text-slate-500">Alternatives: </span>
-            <span className="text-xs text-slate-600">{part.alternatives.join(', ')}</span>
-          </div>
-        )}
-      </div>
-    ))}
-    
-    <button className="w-full py-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-      📋 Copy Parts List
-    </button>
-  </div>
-);
+      ))}
+      
+      <button 
+        onClick={copyPartsList}
+        className="w-full py-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+      >
+        {copied ? '✓ Copied!' : '📋 Copy Parts List'}
+      </button>
+    </div>
+  );
+};
 
 const ToolsTab: React.FC<{ tools: Tool[] }> = ({ tools }) => {
   const required = tools.filter(t => t.required);
@@ -384,6 +417,8 @@ const QATab: React.FC<{
   onContinue?: () => void;
   onSelectStopPoint?: (index: number) => void;
   onSeekToTimestamp?: (timestamp: number) => void;
+  mode?: AppMode;
+  sessionHistory?: { question: string; answer: string; evaluation: Evaluation }[];
 }> = ({ 
   plan, 
   currentStopPoint, 
@@ -391,10 +426,13 @@ const QATab: React.FC<{
   onAnswerSubmit,
   onContinue,
   onSelectStopPoint,
-  onSeekToTimestamp 
+  onSeekToTimestamp,
+  mode,
+  sessionHistory = []
 }) => {
   const [answer, setAnswer] = useState('');
   const [isEvaluating, setIsEvaluating] = useState(false);
+  const [currentEvaluation, setCurrentEvaluation] = useState<Evaluation | null>(null);
 
   if (!plan.stopPoints || plan.stopPoints.length === 0) {
     return (
@@ -418,6 +456,7 @@ const QATab: React.FC<{
       const { evaluateAnswer } = await import('../services/geminiService');
       const evaluation = await evaluateAnswer(currentStopPoint, answer, plan);
       
+      setCurrentEvaluation(evaluation);
       onAnswerSubmit(answer, evaluation);
       setAnswer('');
     } catch (e) {
@@ -426,6 +465,12 @@ const QATab: React.FC<{
     } finally {
       setIsEvaluating(false);
     }
+  };
+
+  const handleContinue = () => {
+    setAnswer('');
+    setCurrentEvaluation(null);
+    onContinue?.();
   };
 
   const formatTimestamp = (seconds: number): string => {
@@ -477,32 +522,97 @@ const QATab: React.FC<{
           
           <p className="text-slate-800 font-medium mb-3">{currentStopPoint.question}</p>
           
-          <textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Type your answer here..."
-            className="w-full p-3 border border-slate-200 rounded-lg text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            rows={4}
-            disabled={isEvaluating}
-          />
-          
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={handleSubmit}
-              disabled={!answer.trim() || isEvaluating}
-              className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isEvaluating ? 'Evaluating...' : 'Submit Answer'}
-            </button>
-            {onContinue && (
+          {/* Show evaluation loading or feedback */}
+          {isEvaluating ? (
+            <div className="flex flex-col items-center justify-center py-8 gap-3">
+              <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-lg font-medium text-slate-700">Evaluating your answer...</p>
+              <p className="text-sm text-slate-500">Gemini is analyzing your response</p>
+            </div>
+          ) : mode === AppMode.FEEDBACK && currentEvaluation ? (
+            <div className="space-y-4">
+              {/* Score */}
+              <div className="flex items-center gap-4">
+                <div className={`text-4xl font-bold ${
+                  currentEvaluation.score >= 4 ? 'text-green-500' : 
+                  currentEvaluation.score >= 3 ? 'text-amber-500' : 'text-red-500'
+                }`}>
+                  {currentEvaluation.score}/5
+                </div>
+                <div className="flex-1">
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full ${
+                        currentEvaluation.score >= 4 ? 'bg-green-500' : 
+                        currentEvaluation.score >= 3 ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${(currentEvaluation.score / 5) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback */}
+              <div className="grid grid-cols-1 gap-3">
+                <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                  <h3 className="text-sm font-bold text-green-800 mb-2">✓ Strengths</h3>
+                  <ul className="text-sm text-green-700 list-disc list-inside space-y-1">
+                    {currentEvaluation.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                  <h3 className="text-sm font-bold text-amber-800 mb-2">⚡ Improvements</h3>
+                  <ul className="text-sm text-amber-700 list-disc list-inside space-y-1">
+                    {currentEvaluation.improvements.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Better Answer */}
+              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                <h3 className="text-sm font-bold text-indigo-900 mb-2">Better Answer</h3>
+                <p className="text-sm text-indigo-800 italic">"{currentEvaluation.rewrittenAnswer}"</p>
+              </div>
+
+              {/* Continue Button */}
               <button
-                onClick={onContinue}
-                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors"
+                onClick={handleContinue}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
               >
-                Skip
+                Continue to Next Question
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            // Show answer form when not evaluating and no feedback
+            <>
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                placeholder="Type your answer here..."
+                className="w-full p-3 border border-slate-200 rounded-lg text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                rows={4}
+                disabled={isEvaluating}
+              />
+              
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={handleSubmit}
+                  disabled={!answer.trim() || isEvaluating}
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isEvaluating ? 'Evaluating...' : 'Submit Answer'}
+                </button>
+                {onContinue && (
+                  <button
+                    onClick={handleContinue}
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition-colors"
+                  >
+                    Skip
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

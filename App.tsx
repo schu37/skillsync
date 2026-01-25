@@ -9,6 +9,7 @@ import VideoPlayer from './components/VideoPlayer';
 import InteractionPanel from './components/InteractionPanel';
 import ModeSelector from './components/ModeSelector';
 import TechnicalPanel from './components/TechnicalPanel';
+import OthersPanel from './components/OthersPanel';
 import DisclaimerModal, { hasAcceptedTerms } from './components/DisclaimerModal';
 import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -103,6 +104,15 @@ const App: React.FC = () => {
     });
   }, []);
 
+  // Auto-regenerate lesson when mode or preset changes (if video already loaded)
+  useEffect(() => {
+    if (videoId && lessonPlan && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION)) {
+      // User changed mode or preset - regenerate the lesson
+      handleRegenerateQuestions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillMode, selectedPreset]);
+
   // Reset app to initial state
   const resetApp = () => {
     setMode(AppMode.IDLE);
@@ -173,7 +183,8 @@ const App: React.FC = () => {
 
     } catch (e) {
       console.error(e);
-      alert("Failed to analyze video. Please check the URL or API limits.");
+      const errorMessage = e instanceof Error ? e.message : "Failed to analyze video. Please check the URL or API limits.";
+      alert(errorMessage);
       setMode(AppMode.IDLE);
     }
   };
@@ -498,7 +509,7 @@ const App: React.FC = () => {
 
           {/* Right Column: Interaction Panel with Tabs */}
           <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4 min-h-[600px]">
-             {lessonPlan && isTechnicalPlan(lessonPlan) && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION) ? (
+             {lessonPlan && isTechnicalPlan(lessonPlan) && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION || mode === AppMode.EVALUATING || mode === AppMode.FEEDBACK) ? (
                <TechnicalPanel 
                  plan={lessonPlan}
                  onSeekToTimestamp={handleSeekToTimestamp}
@@ -507,7 +518,11 @@ const App: React.FC = () => {
                  onAnswerSubmit={handleAnswerSubmit}
                  onContinue={handleContinue}
                  onSelectStopPoint={handleSelectStopPoint}
+                 mode={mode}
+                 sessionHistory={sessionHistory}
                />
+             ) : lessonPlan && lessonPlan.mode === 'others' ? (
+               <OthersPanel plan={lessonPlan} />
              ) : (
                <InteractionPanel 
                   mode={mode}
@@ -557,7 +572,7 @@ const App: React.FC = () => {
             <span className="text-slate-300">|</span>
             <a href="/terms" className="hover:text-indigo-600 transition-colors">Terms of Service</a>
             <span className="text-slate-300">|</span>
-            <span>© 2026 SkillSync</span>
+            <span>2026 SkillSync</span>
           </div>
         </div>
       </footer>

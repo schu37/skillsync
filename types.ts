@@ -17,7 +17,7 @@ export enum AppMode {
   ASKING_QUESTION = 'ASKING_QUESTION',
 }
 
-export type SkillMode = 'soft' | 'technical';
+export type SkillMode = 'soft' | 'technical' | 'others';
 
 export type QuestionType = 'prediction' | 'diagnostic' | 'synthesis' | 'design-reasoning';
 

@@ -239,13 +239,19 @@ const detectVideoMode = async (
   const systemPrompt = `
 You are analyzing a video to determine if it contains educational/learnable content and classify it.
 
-IMPORTANT: Set isEducational=true for ANY educational content including tutorials, lessons, how-tos, AND communication/soft skills demonstrations.
+IMPORTANT: Set isEducational=true for ANY educational content including:
+- Tutorials with OR without narration (visual demonstrations count!)
+- How-to videos (cooking, crafts, building, repairs)
+- Technical demonstrations (even if silent)
+- Communication/soft skills demonstrations
+- Step-by-step processes shown visually
 
 ONLY set isEducational=false for pure entertainment with NO learning value:
 - Comedy sketches, vlogs, reactions (no skills taught)
-- Music videos, gaming highlights (no tutorial)
+- Music videos, gaming highlights (no tutorial aspect)
 - Random memes, advertisements
-- Pure product showcases (no how-to)
+- Pure product showcases (no how-to or educational aspect)
+- Entertainment content with zero instructional value
 
 IF isEducational=true, then classify as:
 
@@ -254,7 +260,8 @@ TECHNICAL SKILLS (mode: 'technical'):
 - Electronics, woodworking, 3D printing
 - Coding tutorials, technical how-tos
 - Engineering, science experiments
-- Any hands-on building or making
+- Cooking/baking demonstrations (even without narration)
+- Any hands-on building, making, or crafting
 
 SOFT SKILLS (mode: 'soft'):
 - Communication, negotiation, persuasion
@@ -296,13 +303,22 @@ Return JSON with: { "isEducational": boolean, "mode": "soft" | "technical" | nul
       reasoning: result.reasoning
     });
 
-    // Reject only pure entertainment (non-educational) content
+    // Classify non-educational content as 'others' instead of rejecting
     if (result.isEducational === false) {
-      throw new Error(`This video doesn't contain learnable content. ${result.reasoning || 'Please try a tutorial, lesson, or how-to video.'}`);
+      return {
+        mode: 'others',
+        confidence: result.confidence || 80,
+        reasoning: result.reasoning || 'No clear educational content detected'
+      };
     }
 
     if (!result.detectedMode) {
-      throw new Error('Could not determine learning category for this video.');
+      // Default to 'others' if classification unclear
+      return {
+        mode: 'others',
+        confidence: 50,
+        reasoning: 'Could not determine specific learning category'
+      };
     }
 
     return {
@@ -363,7 +379,8 @@ export const generateLessonPlan = async (
   // This helps catch misclassifications
   let effectiveMode = userSelectedMode;
   
-  // Only auto-detect if not forcing a specific mode
+  // Only auto-detect if user hasn't forced a specific mode via preset selection
+  // This allows users to override the detection for edge cases (e.g., silent cooking videos)
   if (!options.projectType && !options.scenarioPreset) {
     const detection = await detectVideoMode(ai, youtubeUrl);
     
@@ -377,11 +394,20 @@ export const generateLessonPlan = async (
       });
       effectiveMode = detection.mode;
     }
+  } else {
+    // User explicitly selected a preset - respect their choice and skip detection
+    logApi('generateLessonPlan - Preset selected, skipping mode detection', {
+      userMode: userSelectedMode,
+      preset: options.projectType || options.scenarioPreset
+    });
   }
 
   let plan: LessonPlan;
   if (effectiveMode === 'technical') {
     plan = await generateTechnicalLessonPlan(ai, youtubeUrl, options.projectType);
+  } else if (effectiveMode === 'others') {
+    // For 'others' mode, generate a basic plan without roleplay
+    plan = await generateSoftSkillsLessonPlan(ai, youtubeUrl, undefined, undefined, true);
   } else {
     plan = await generateSoftSkillsLessonPlan(ai, youtubeUrl, options.scenarioPreset);
   }
@@ -403,7 +429,8 @@ const generateSoftSkillsLessonPlan = async (
   ai: GoogleGenAI,
   youtubeUrl: string,
   scenarioPreset?: string,
-  regenerationSeed?: number
+  regenerationSeed?: number,
+  excludeRoleplay?: boolean
 ): Promise<SoftSkillsLessonPlan> => {
   const scenarioContext = scenarioPreset 
     ? `The user is specifically practicing: ${scenarioPreset}.`
@@ -445,8 +472,7 @@ BALANCE YOUR QUESTIONS:
 - Include at least one prediction or diagnostic question (application)
 - Include at least one synthesis, evaluation, or open-ended question (higher-order thinking)
 
-CREATE A ROLEPLAY PERSONA for voice practice:
-- A character the user can practice with (e.g., "demanding boss", "skeptical client")
+${excludeRoleplay ? '' : 'CREATE A ROLEPLAY PERSONA for voice practice:\n- A character the user can practice with (e.g., "demanding boss", "skeptical client")'}
 
 Be specific and reference actual content from the video, not generic advice.
 `;
@@ -483,6 +509,7 @@ Be specific and reference actual content from the video, not generic advice.
       videoUrl: youtubeUrl,
       mode: 'soft' as const,
       createdAt: new Date().toISOString(),
+      ...(excludeRoleplay ? { rolePlayPersona: undefined } : {}),
     } as SoftSkillsLessonPlan;
     logApi('generateSoftSkillsLessonPlan - Parsed', { 
       stopPointsCount: result.stopPoints?.length,
