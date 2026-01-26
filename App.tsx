@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { AppMode, LessonPlan, Evaluation, StudyPack, SkillMode, isTechnicalPlan, isSoftSkillsPlan } from './types';
-import { generateLessonPlan, generateStudyPack, regenerateQuestionsOnly } from './services/geminiService';
-import { storage, sessionStorage } from './services/storageService';
+import { generateLessonPlan, generateStudyPack, regenerateQuestionsOnly, detectVideoMode, ModeDetectionResult } from './services/geminiService';
+import { storage, sessionStorage, progressStorage, videoCache } from './services/storageService';
 import { exportToGoogleDocs } from './services/exportService';
-import { DEMO_VIDEO_ID, APP_TITLE, APP_DESCRIPTION } from './constants';
+import { DEMO_VIDEO_ID, APP_TITLE, APP_DESCRIPTION, SOFT_SKILL_PRESETS, TECHNICAL_PROJECT_TYPES } from './constants';
+import { extractVideoId } from './utils';
 import VideoPlayer from './components/VideoPlayer';
 import InteractionPanel from './components/InteractionPanel';
 import ModeSelector from './components/ModeSelector';
-import TechnicalPanel from './components/TechnicalPanel';
-import OthersPanel from './components/OthersPanel';
+import LearningPanel from './components/LearningPanel';
 import DisclaimerModal, { hasAcceptedTerms } from './components/DisclaimerModal';
 import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import VoiceRoleplay from './components/VoiceRoleplay';
+import ExportModal from './components/ExportModal';
 
 const App: React.FC = () => {
   // State
@@ -36,6 +37,22 @@ const App: React.FC = () => {
   const [seekTimestamp, setSeekTimestamp] = useState<number | null>(null);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [showVoiceRoleplay, setShowVoiceRoleplay] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showModeChangeWarning, setShowModeChangeWarning] = useState(false);
+  const [pendingMode, setPendingMode] = useState<SkillMode | null>(null);
+  const [pendingPreset, setPendingPreset] = useState<string | null>(null);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [savedProgressSummary, setSavedProgressSummary] = useState<{
+    videoUrl: string;
+    mode: SkillMode;
+    questionsAnswered: number;
+    savedAt: string;
+  } | null>(null);
+  
+  // Mode auto-detection state
+  const [detectionResult, setDetectionResult] = useState<ModeDetectionResult | null>(null);
+  const [isUserOverride, setIsUserOverride] = useState(false); // True if user manually changed mode
+  const [loadingMode, setLoadingMode] = useState<SkillMode | null>(null); // Track which mode is being loaded
   
   // Google OAuth configuration
   const isGoogleOAuthConfigured = !!(import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
@@ -102,16 +119,64 @@ const App: React.FC = () => {
     storage.getSettings().then(settings => {
       setSkillMode(settings.preferredMode);
     });
+    
+    // Check for resumable progress
+    const summary = progressStorage.getSummary();
+    if (summary) {
+      setSavedProgressSummary(summary);
+      setShowResumePrompt(true);
+    }
   }, []);
 
-  // Auto-regenerate lesson when mode or preset changes (if video already loaded)
+  // Save progress when important state changes
   useEffect(() => {
-    if (videoId && lessonPlan && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION)) {
-      // User changed mode or preset - regenerate the lesson
-      handleRegenerateQuestions();
+    if (lessonPlan && videoId && mode !== AppMode.IDLE && mode !== AppMode.LOADING_PLAN) {
+      progressStorage.save({
+        videoUrl: lessonPlan.videoUrl,
+        videoId,
+        skillMode,
+        selectedPreset,
+        lessonPlan,
+        currentStopIndex,
+        sessionHistory,
+        answeredQuestionIds: Array.from(answeredQuestionIds),
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skillMode, selectedPreset]);
+  }, [lessonPlan, currentStopIndex, sessionHistory, answeredQuestionIds]);
+
+  // Handle resuming a session
+  const handleResumeSession = () => {
+    const saved = progressStorage.get();
+    if (!saved) {
+      setShowResumePrompt(false);
+      return;
+    }
+
+    // Restore state
+    setVideoUrl(saved.videoUrl);
+    setVideoId(saved.videoId);
+    setSkillMode(saved.skillMode);
+    setSelectedPreset(saved.selectedPreset);
+    setLessonPlan(saved.lessonPlan);
+    setCurrentStopIndex(saved.currentStopIndex);
+    setSessionHistory(saved.sessionHistory);
+    setAnsweredQuestionIds(new Set(saved.answeredQuestionIds));
+    setMode(AppMode.PLAN_READY);
+    setShowResumePrompt(false);
+
+    // Auto-start after brief delay
+    setTimeout(() => {
+      setMode(AppMode.PLAYING);
+      setIsPlaying(true);
+    }, 500);
+  };
+
+  // Handle declining to resume
+  const handleDeclineResume = () => {
+    progressStorage.clear();
+    setShowResumePrompt(false);
+    setSavedProgressSummary(null);
+  };
 
   // Reset app to initial state
   const resetApp = () => {
@@ -130,23 +195,70 @@ const App: React.FC = () => {
     setSkipAnswered(false);
     setSeekTimestamp(null);
     setShowVoiceRoleplay(false);
+    setDetectionResult(null);
+    setIsUserOverride(false);
+    progressStorage.clear(); // Clear saved progress on reset
   };
 
-  // Helper to extract ID (supports watch, shorts, youtu.be, embed)
-  const extractVideoId = (url: string) => {
-    // Handle YouTube Shorts
-    const shortsMatch = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
-    if (shortsMatch) return shortsMatch[1];
+  // Handle mode change confirmation
+  const handleModeChangeConfirm = () => {
+    if (pendingMode) {
+      handleSmartModeSwitch(pendingMode, pendingPreset || undefined);
+    } else {
+      setShowModeChangeWarning(false);
+      setPendingMode(null);
+      setPendingPreset(null);
+    }
+  };
+
+  // Handle mode change cancellation
+  const handleModeChangeCancel = () => {
+    setShowModeChangeWarning(false);
+    setPendingMode(null);
+    setPendingPreset(null);
+  };
+
+  // Smart mode switch: use cache if available, otherwise re-analyze
+  const handleSmartModeSwitch = async (newMode: SkillMode, preset?: string) => {
+    if (!videoId) return;
     
-    // Handle standard URLs
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
+    setShowModeChangeWarning(false);
+    setPendingMode(null);
+    setPendingPreset(null);
+    
+    // Update mode and preset
+    setSkillMode(newMode);
+    setSelectedPreset(preset || '');
+    setIsUserOverride(true);
+    storage.saveSettings({ preferredMode: newMode });
+    
+    // Check if we have a cached plan for this mode
+    const cachedPlan = videoCache.get(videoUrl, newMode);
+    
+    if (cachedPlan) {
+      // Instant switch - use cached plan
+      setLessonPlan(cachedPlan);
+      setMode(AppMode.PLAN_READY);
+      setCurrentStopIndex(0);
+      setSessionHistory([]);
+      
+      // Auto-start for soft skills
+      if (newMode === 'soft') {
+        setTimeout(() => {
+          setMode(AppMode.PLAYING);
+          setIsPlaying(true);
+        }, 500);
+      }
+    } else {
+      // Need to re-analyze for this mode
+      loadLesson(videoId, false);
+    }
   };
 
-  const loadLesson = async (id: string) => {
+  const loadLesson = async (id: string, forceRefresh: boolean = false) => {
     setVideoId(id);
     setMode(AppMode.LOADING_PLAN);
+    setLoadingMode(skillMode); // Track which mode we're loading
     setIsPlaying(false);
     
     try {
@@ -159,6 +271,7 @@ const App: React.FC = () => {
       const plan = await generateLessonPlan(id, skillMode, {
         scenarioPreset: skillMode === 'soft' ? effectivePreset : undefined,
         projectType: skillMode === 'technical' ? effectivePreset : undefined,
+        forceRefresh, // Pass through to bypass cache
       });
       
       // Ensure robust stop points
@@ -166,6 +279,7 @@ const App: React.FC = () => {
       plan.stopPoints.sort((a, b) => a.timestamp - b.timestamp);
       
       setLessonPlan(plan);
+      setLoadingMode(null); // Clear loading mode
       
       // Save to storage
       await storage.saveLessonPlan(plan);
@@ -183,6 +297,7 @@ const App: React.FC = () => {
 
     } catch (e) {
       console.error(e);
+      setLoadingMode(null); // Clear loading mode on error
       const errorMessage = e instanceof Error ? e.message : "Failed to analyze video. Please check the URL or API limits.";
       alert(errorMessage);
       setMode(AppMode.IDLE);
@@ -191,17 +306,98 @@ const App: React.FC = () => {
 
   const handleStartDemo = () => {
     setVideoUrl(`https://www.youtube.com/watch?v=${DEMO_VIDEO_ID}`);
+    // For demo, skip detection and use soft skills
+    setSkillMode('soft');
+    setIsUserOverride(false);
     loadLesson(DEMO_VIDEO_ID);
   };
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      const id = extractVideoId(videoUrl);
-      if (id) {
-          loadLesson(id);
-      } else {
-          alert("Invalid YouTube URL");
+  // New flow: URL submit -> detect mode -> show detected -> user confirms -> load lesson
+  const handleUrlSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = extractVideoId(videoUrl);
+    if (!id) {
+      alert("Invalid YouTube URL. Please enter a valid YouTube video link (e.g., youtube.com/watch?v=... or youtu.be/...)");
+      return;
+    }
+    
+    setVideoId(id);
+    
+    // Check if we have cached plans for any mode
+    const cachedSoft = videoCache.get(videoUrl, 'soft');
+    const cachedTechnical = videoCache.get(videoUrl, 'technical');
+    const cachedOthers = videoCache.get(videoUrl, 'others');
+    
+    // If we have a cached plan from before, use its mode
+    if (cachedSoft || cachedTechnical || cachedOthers) {
+      const cached = cachedSoft || cachedTechnical || cachedOthers;
+      if (cached) {
+        setSkillMode(cached.mode);
+        setDetectionResult({
+          mode: cached.mode,
+          confidence: 100,
+          reasoning: 'Loaded from cache'
+        });
+        setIsUserOverride(false);
+        setMode(AppMode.MODE_DETECTED);
+        return;
       }
+    }
+    
+    // No cache - run auto-detection
+    setMode(AppMode.DETECTING_MODE);
+    
+    try {
+      const detection = await detectVideoMode(id);
+      setDetectionResult(detection);
+      setSkillMode(detection.mode);
+      setIsUserOverride(false);
+      setMode(AppMode.MODE_DETECTED);
+    } catch (e) {
+      console.error('Detection failed, proceeding with user selection', e);
+      // If detection fails, let user choose and proceed
+      setDetectionResult(null);
+      setMode(AppMode.MODE_DETECTED);
+    }
+  };
+
+  // User confirms the detected/selected mode and proceeds to lesson
+  const handleConfirmMode = () => {
+    if (videoId) {
+      loadLesson(videoId);
+    }
+  };
+
+  // User changes mode in MODE_DETECTED state
+  const handleModeChangeInDetection = (newMode: SkillMode) => {
+    setSkillMode(newMode);
+    setIsUserOverride(true);
+    
+    // Check if there's a cached plan for this mode
+    const cachedForNewMode = videoCache.get(videoUrl, newMode);
+    if (cachedForNewMode) {
+      // Update reasoning to show cache available
+      setDetectionResult({
+        mode: newMode,
+        confidence: 100,
+        reasoning: `Cached lesson plan available for ${newMode} mode`
+      });
+    } else {
+      setDetectionResult({
+        mode: newMode,
+        confidence: 0,
+        reasoning: `Will analyze video for ${newMode} mode (no cache)`
+      });
+    }
+    
+    // Reset preset when mode changes
+    if (newMode === 'soft') {
+      setSelectedPreset('negotiation');
+    } else if (newMode === 'technical') {
+      setSelectedPreset('electronics');
+    } else {
+      setSelectedPreset('');
+    }
   };
 
   const handleTimeUpdate = (time: number) => {
@@ -257,10 +453,13 @@ const App: React.FC = () => {
     }
   };
 
-  // Finish session and generate study pack
+  // Finish session - only generate study pack for soft skills mode
   const finishSession = async () => {
-    setMode(AppMode.GENERATING_PACK);
-    if (lessonPlan) {
+    if (!lessonPlan) return;
+    
+    // Only generate Study Pack for soft skills mode
+    if (skillMode === 'soft') {
+      setMode(AppMode.GENERATING_PACK);
       try {
         const pack = await generateStudyPack(lessonPlan, sessionHistory);
         setStudyPack(pack);
@@ -270,6 +469,9 @@ const App: React.FC = () => {
         alert("Could not generate study pack.");
         setMode(AppMode.COMPLETED);
       }
+    } else {
+      // For technical/others mode, just go to completed
+      setMode(AppMode.COMPLETED);
     }
   };
 
@@ -281,10 +483,11 @@ const App: React.FC = () => {
     setMode(AppMode.LOADING_PLAN);
     
     try {
-      // Use lightweight regeneration (no video re-analysis)
-      const plan = await regenerateQuestionsOnly(videoId, skillMode, {
+      // For mode changes, force full regeneration (not just questions)
+      const plan = await generateLessonPlan(videoId, skillMode, {
         scenarioPreset: skillMode === 'soft' ? selectedPreset : undefined,
         projectType: skillMode === 'technical' ? selectedPreset : undefined,
+        forceRefresh: true, // Force fresh generation for mode changes
       });
       
       // Ensure robust stop points with unique IDs
@@ -380,150 +583,407 @@ const App: React.FC = () => {
         <DisclaimerModal onAccept={() => setShowDisclaimer(false)} />
       )}
 
-      {/* Navbar */}
-      <nav className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 md:gap-0">
-        <div className="flex items-center gap-3">
-            {/* Logo: try to load public/logo.png, fall back to letter S */}
+      {/* Mode Change Warning Modal */}
+      {showModeChangeWarning && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900">Switch Learning Mode?</h2>
+            </div>
+            
+            <div className="space-y-3 text-slate-700">
+              <p>
+                {/* Show subcategory if switching within same mode, otherwise show mode */}
+                {pendingMode === skillMode && pendingPreset ? (
+                  <>
+                    Switch to <strong>
+                      {[...SOFT_SKILL_PRESETS, ...TECHNICAL_PROJECT_TYPES].find(p => p.id === pendingPreset)?.icon || ''}{' '}
+                      {[...SOFT_SKILL_PRESETS, ...TECHNICAL_PROJECT_TYPES].find(p => p.id === pendingPreset)?.label || pendingPreset}
+                    </strong> scenario for this video?
+                  </>
+                ) : (
+                  <>
+                    Switch to <strong>{pendingMode === 'technical' ? '🛠️ Technical' : pendingMode === 'soft' ? '🎭 Soft Skills' : '📋 General'}</strong> mode for this video?
+                  </>
+                )}
+              </p>
+              {videoCache.get(videoUrl, pendingMode || 'soft') ? (
+                <p className="text-sm bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded flex items-center gap-2">
+                  <span className="text-emerald-600">📦</span>
+                  <span><strong>Cached plan available!</strong> This will switch instantly.</span>
+                </p>
+              ) : (
+                <p className="text-sm bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                  This will re-analyze the video for the new mode. Your current progress will be preserved in cache. You need to click "Re-analyze" again to load the new mode.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleModeChangeCancel}
+                className="flex-1 px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleModeChangeConfirm}
+                className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+              >
+                {videoCache.get(videoUrl, pendingMode || 'soft') ? 'Switch Now' : 'Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resume Session Prompt */}
+      {showResumePrompt && savedProgressSummary && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-2xl">📚</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900">Resume Session?</h2>
+            </div>
+            
+            <div className="space-y-3 text-slate-700">
+              <p>
+                You have a saved learning session from{' '}
+                <strong>{new Date(savedProgressSummary.savedAt).toLocaleString()}</strong>
+              </p>
+              
+              <div className="bg-slate-50 p-3 rounded-lg space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-500">Mode:</span>
+                  <span className={`px-2 py-0.5 rounded font-medium ${
+                    savedProgressSummary.mode === 'technical' ? 'bg-emerald-100 text-emerald-700' :
+                    savedProgressSummary.mode === 'soft' ? 'bg-purple-100 text-purple-700' :
+                    'bg-slate-200 text-slate-700'
+                  }`}>
+                    {savedProgressSummary.mode === 'technical' ? '🛠️ Technical' :
+                     savedProgressSummary.mode === 'soft' ? '🎭 Soft Skills' : '📋 General'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-500">Progress:</span>
+                  <span className="font-medium">
+                    {savedProgressSummary.questionsAnswered} questions answered
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 truncate">
+                  {savedProgressSummary.videoUrl}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleDeclineResume}
+                className="flex-1 px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-medium transition-colors"
+              >
+                Start Fresh
+              </button>
+              <button
+                onClick={handleResumeSession}
+                className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Resume
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Navbar - Only shown when NOT in IDLE state */}
+      {mode !== AppMode.IDLE && (
+        <nav className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={resetApp}>
             {logoLoaded ? (
               <img
-                src="/logo.png"
+                src="/icon.png"
                 alt="SkillSync logo"
-                className="w-10 h-10 rounded-lg object-cover"
+                className="w-8 h-8 rounded-lg object-contain"
                 onError={() => setLogoLoaded(false)}
               />
             ) : (
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">S</div>
+              <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">S</div>
             )}
-            <div>
-                <h1 className="text-xl font-bold tracking-tight text-slate-900">{APP_TITLE}</h1>
-                <p className="text-xs text-slate-500 hidden sm:block">{APP_DESCRIPTION}</p>
-            </div>
-        </div>
-        
-        {/* Input Bar + Mode Selector */}
-        <div className="flex-1 max-w-2xl mx-4">
-            {mode === AppMode.IDLE && (
-                <div className="space-y-3">
-                    {/* Mode Selector */}
-                    <ModeSelector
-                      skillMode={skillMode}
-                      onModeChange={(m) => {
-                        setSkillMode(m);
-                        // Default to first preset for soft skills, clear for technical
-                        const defaultPreset = m === 'soft' ? 'negotiation' : '';
-                        setSelectedPreset(defaultPreset);
-                        storage.saveSettings({ preferredMode: m });
-                      }}
-                      selectedPreset={selectedPreset}
-                      onPresetChange={setSelectedPreset}
-                      disabled={mode !== AppMode.IDLE}
-                    />
-                    
-                    {/* URL Input */}
-                    <form onSubmit={handleUrlSubmit} className="flex gap-2">
-                        <input 
-                            type="text" 
-                            placeholder="Paste YouTube URL..." 
-                            className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                            value={videoUrl}
-                            onChange={(e) => setVideoUrl(e.target.value.trim())}
-                        />
-                        <button type="submit" className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
-                            Load
-                        </button>
-                    </form>
-                </div>
+            <h1 className="text-lg font-bold tracking-tight text-slate-900 hidden sm:block">{APP_TITLE}</h1>
+          </div>
+          
+          {/* Center: Mode indicator + switcher */}
+          <div className="flex items-center gap-2">
+            {/* Current mode badge - show "Analyzing" during loading to avoid misleading users */}
+            {mode === AppMode.LOADING_PLAN || mode === AppMode.DETECTING_MODE ? (
+              <div className="px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2 bg-slate-100 text-slate-600">
+                <div className="w-3 h-3 border-2 border-slate-500 border-t-transparent rounded-full animate-spin"></div>
+                Analyzing...
+              </div>
+            ) : (
+              <div className={`px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2 ${
+                skillMode === 'technical' ? 'bg-emerald-100 text-emerald-700' :
+                skillMode === 'soft' ? 'bg-purple-100 text-purple-700' :
+                'bg-slate-200 text-slate-700'
+              }`}>
+                {skillMode === 'technical' ? '🛠️ Technical' :
+                 skillMode === 'soft' ? '🎭 Soft Skills' : '📋 General'}
+              </div>
             )}
             
-            {/* Show current mode when not idle */}
-            {mode !== AppMode.IDLE && lessonPlan && (
-              <div className="flex items-center gap-3">
-                <ModeSelector
-                  skillMode={skillMode}
-                  onModeChange={(m) => {
-                    if (confirm('Changing the mode will reload the lesson plan. Continue?')) {
-                      setSkillMode(m);
-                      const defaultPreset = m === 'soft' ? 'negotiation' : '';
-                      setSelectedPreset(defaultPreset);
-                      storage.saveSettings({ preferredMode: m });
-                      // Reload the lesson with new mode
-                      loadLesson(videoId);
+            {/* Mode switcher dropdown - only when lesson is loaded */}
+            {lessonPlan && mode !== AppMode.LOADING_PLAN && (
+              <>
+                <select
+                  value={skillMode}
+                  onChange={(e) => {
+                    const newMode = e.target.value as SkillMode;
+                    if (newMode !== skillMode) {
+                      setPendingMode(newMode);
+                      setPendingPreset(newMode === 'soft' ? 'negotiation' : '');
+                      setShowModeChangeWarning(true);
                     }
                   }}
-                  selectedPreset={selectedPreset}
-                  onPresetChange={(p) => {
-                    setSelectedPreset(p);
-                    if (confirm('Changing the preset will reload the lesson plan. Continue?')) {
-                      loadLesson(videoId);
-                    }
-                  }}
-                  disabled={false}
-                />
-              </div>
-            )}
-            {mode !== AppMode.IDLE && (
-                <button 
-                   onClick={resetApp}
-                   className="text-slate-500 hover:text-slate-700 text-sm font-medium"
+                  className="text-xs bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-200"
                 >
-                   Start Over
-                </button>
-            )}
-        </div>
-      </nav>
-
-      {/* Main Layout */}
-      <main className="max-w-7xl mx-auto p-4 md:p-6 min-h-[calc(100vh-140px)]">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          {/* Left Column: Video Player */}
-          <div className="lg:col-span-7 xl:col-span-7">
-            <div className="lg:sticky lg:top-24">
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                {videoId ? (
-                    <VideoPlayer 
-                       videoId={videoId}
-                       stopPoints={lessonPlan?.stopPoints || []}
-                       currentStopIndex={currentStopIndex}
-                       onTimeUpdate={handleTimeUpdate}
-                       onReachStopPoint={handleReachStopPoint}
-                       onSeekToStopPoint={(idx, _ts) => {
-                         handleSelectStopPoint(idx);
-                       }}
-                       isPlaying={isPlaying}
-                       setIsPlaying={setIsPlaying}
-                       seekToTimestamp={seekTimestamp} // NEW prop
-                    />
-                ) : (
-                   <div className="aspect-video flex flex-col items-center justify-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
-                       <svg className="w-16 h-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                       </svg>
-                       <p>Enter a URL to begin</p>
-                   </div>
+                  <option value="soft">🎭 Soft Skills</option>
+                  <option value="technical">🛠️ Technical</option>
+                  <option value="others">📋 General</option>
+                </select>
+                
+                {/* Preset/Sub-category dropdown - only for soft/technical */}
+                {skillMode !== 'others' && (
+                  <select
+                    value={selectedPreset}
+                    onChange={(e) => {
+                      const newPreset = e.target.value;
+                      if (newPreset !== selectedPreset) {
+                        setPendingMode(skillMode);
+                        setPendingPreset(newPreset);
+                        setShowModeChangeWarning(true);
+                      }
+                    }}
+                    className="text-xs bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-200 max-w-[140px]"
+                  >
+                    {(skillMode === 'soft' ? SOFT_SKILL_PRESETS : TECHNICAL_PROJECT_TYPES).map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.icon} {preset.label}
+                      </option>
+                    ))}
+                  </select>
                 )}
-              </div>
-            </div>
+                
+                {/* Re-analyze button */}
+                <button
+                  onClick={() => loadLesson(videoId, true)}
+                  title="Re-analyze video with current settings"
+                  className="text-xs px-2 py-1 bg-red-400 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors flex items-center gap-1"
+                >
+                  🔄 Re-analyze
+                </button>
+              </>
+            )}
+          </div>
+          
+          {/* Right: Export + New Video buttons */}
+          <div className="flex items-center gap-2">
+            {/* Export button - only when lesson plan exists */}
+            {lessonPlan && (
+              <button 
+                onClick={() => setShowExportModal(true)}
+                className="text-sm px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors flex items-center gap-1.5"
+              >
+                📥 Export
+              </button>
+            )}
+            
+            <button 
+              onClick={resetApp}
+              disabled={mode === AppMode.LOADING_PLAN || isRegenerating}
+              className="text-sm px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors disabled:opacity-50"
+            >
+              ← New Video
+            </button>
+          </div>
+        </nav>
+      )}
+
+      {/* IDLE State: Google-style Landing Page */}
+      {mode === AppMode.IDLE && (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 -mt-10">
+          {/* Logo + Title */}
+          <div className="text-center mb-8">
+            {logoLoaded ? (
+              <img
+                src="/web-app-manifest-512x512.png"
+                alt="SkillSync logo"
+                className="w-24 h-24 mx-auto mb-4 rounded-2xl object-contain shadow-lg"
+                onError={() => setLogoLoaded(false)}
+              />
+            ) : (
+              <div className="w-24 h-24 mx-auto mb-4 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-4xl shadow-lg">S</div>
+            )}
+            <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-2">{APP_TITLE}</h1>
+            <p className="text-lg text-slate-600">{APP_DESCRIPTION}</p>
           </div>
 
-          {/* Right Column: Interaction Panel with Tabs */}
-          <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4 min-h-[600px]">
-             {lessonPlan && isTechnicalPlan(lessonPlan) && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION || mode === AppMode.EVALUATING || mode === AppMode.FEEDBACK) ? (
-               <TechnicalPanel 
-                 plan={lessonPlan}
-                 onSeekToTimestamp={handleSeekToTimestamp}
-                 currentStopPoint={currentStopPoint}
-                 currentStopIndex={currentStopIndex}
-                 onAnswerSubmit={handleAnswerSubmit}
-                 onContinue={handleContinue}
-                 onSelectStopPoint={handleSelectStopPoint}
-                 mode={mode}
-                 sessionHistory={sessionHistory}
-               />
-             ) : lessonPlan && lessonPlan.mode === 'others' ? (
-               <OthersPanel plan={lessonPlan} />
+          {/* Search Box */}
+          <form onSubmit={handleUrlSubmit} className="w-full max-w-2xl mb-8">
+            <div className="relative group">
+              <input 
+                type="text" 
+                placeholder="Paste a YouTube video URL (only YouTube supported)..." 
+                className="w-full px-6 py-4 text-lg border-2 border-slate-200 rounded-full shadow-sm focus:ring-4 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all group-hover:shadow-md"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value.trim())}
+                autoFocus
+              />
+              <button 
+                type="submit" 
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-md"
+              >
+                🔍 Analyze
+              </button>
+            </div>
+            <p className="text-center text-sm text-slate-500 mt-3">
+              🤖 AI will auto-detect the best learning mode for your video
+            </p>
+          </form>
+
+          {/* Quick Actions */}
+          <div className="flex flex-wrap justify-center gap-3 mb-8">
+            <button
+              onClick={handleStartDemo}
+              className="px-5 py-2.5 bg-white border border-slate-200 rounded-full text-sm font-medium text-slate-700 hover:bg-slate-50 hover:shadow-md transition-all"
+            >
+              ▶️ Try Demo Video
+            </button>
+          </div>
+
+          </div>
+      )}
+
+      {/* DETECTING_MODE & MODE_DETECTED: Centered modal-style */}
+      {(mode === AppMode.DETECTING_MODE || mode === AppMode.MODE_DETECTED) && (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 -mt-10">
+          <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-lg w-full">
+            {mode === AppMode.DETECTING_MODE && (
+              <div className="text-center space-y-4">
+                <div className="w-16 h-16 mx-auto border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                <h2 className="text-xl font-semibold text-slate-900">Analyzing Video...</h2>
+                <p className="text-slate-600">AI is detecting the best learning mode for your video</p>
+              </div>
+            )}
+            
+            {mode === AppMode.MODE_DETECTED && (
+              <div className="space-y-5">
+                <div className="text-center">
+                  <h2 className="text-xl font-semibold text-slate-900 mb-1">Mode Detected</h2>
+                  {isUserOverride && (
+                    <span className="text-xs px-3 py-1 bg-amber-100 text-amber-700 rounded-full inline-block">
+                      👤 User override
+                    </span>
+                  )}
+                </div>
+                
+                <ModeSelector
+                  skillMode={skillMode}
+                  onModeChange={handleModeChangeInDetection}
+                  selectedPreset={selectedPreset}
+                  onPresetChange={setSelectedPreset}
+                  disabled={false}
+                />
+                
+                {detectionResult?.reasoning && (
+                  <p className="text-sm text-slate-500 italic text-center">
+                    💡 {detectionResult.reasoning}
+                  </p>
+                )}
+                
+                {videoCache.get(videoUrl, skillMode) && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg">
+                    <span>📦 Cached lesson available</span>
+                    <button onClick={() => loadLesson(videoId, true)} className="underline font-medium">Re-analyze</button>
+                  </div>
+                )}
+                
+                <div className="flex gap-3 pt-2">
+                  <button onClick={resetApp} className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium transition-colors">
+                    ← Cancel
+                  </button>
+                  <button onClick={handleConfirmMode} className="flex-1 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors">
+                    {videoCache.get(videoUrl, skillMode) ? 'Load Cached →' : 'Start Learning →'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Learning Layout - Only shown when lesson is active */}
+      {mode !== AppMode.IDLE && mode !== AppMode.DETECTING_MODE && mode !== AppMode.MODE_DETECTED && (
+        <main className="max-w-7xl mx-auto p-4 md:p-6 min-h-[calc(100vh-140px)]">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Left Column: Video Player */}
+            <div className="lg:col-span-7 xl:col-span-7">
+              <div className="lg:sticky lg:top-20">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                  {videoId ? (
+                      <VideoPlayer 
+                         videoId={videoId}
+                         stopPoints={lessonPlan?.stopPoints || []}
+                         currentStopIndex={currentStopIndex}
+                         onTimeUpdate={handleTimeUpdate}
+                         onReachStopPoint={handleReachStopPoint}
+                         onSeekToStopPoint={(idx, _ts) => {
+                           handleSelectStopPoint(idx);
+                         }}
+                         isPlaying={isPlaying}
+                         setIsPlaying={setIsPlaying}
+                         seekToTimestamp={seekTimestamp}
+                      />
+                  ) : (
+                     <div className="aspect-video flex flex-col items-center justify-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
+                         <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                         <p>Loading video...</p>
+                     </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Unified Learning Panel */}
+            <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4 min-h-[600px]">
+               {lessonPlan && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION || mode === AppMode.EVALUATING || mode === AppMode.FEEDBACK || mode === AppMode.COMPLETED || mode === AppMode.PACK_READY || mode === AppMode.GENERATING_PACK) ? (
+                 <LearningPanel
+                   lessonPlan={lessonPlan}
+                   skillMode={skillMode}
+                   mode={mode}
+                   currentStopPoint={currentStopPoint}
+                   currentStopIndex={currentStopIndex}
+                   onAnswerSubmit={handleAnswerSubmit}
+                   onContinue={handleContinue}
+                   onSelectStopPoint={handleSelectStopPoint}
+                   onSeekToTimestamp={handleSeekToTimestamp}
+                   sessionHistory={sessionHistory}
+                   answeredQuestionIds={answeredQuestionIds}
+                   skipAnswered={skipAnswered}
+                   onToggleSkipAnswered={() => setSkipAnswered(!skipAnswered)}
+                   studyPack={studyPack}
+                   showVoiceRoleplayButton={skillMode === 'soft' && isSoftSkillsPlan(lessonPlan) && !!lessonPlan.rolePlayPersona}
+                   onStartVoiceRoleplay={() => setShowVoiceRoleplay(true)}
+                   selectedScenario={selectedPreset}
+                   googleAccessToken={googleAccessToken}
+                   onRequestGoogleAuth={googleLogin}
+                 />
              ) : (
+               // Fallback for IDLE/LOADING states - show InteractionPanel for loading UI
                <InteractionPanel 
                   mode={mode}
                   lessonPlan={lessonPlan}
@@ -540,21 +1000,38 @@ const App: React.FC = () => {
                   answeredQuestionIds={answeredQuestionIds}
                   skipAnswered={skipAnswered}
                   onToggleSkipAnswered={() => setSkipAnswered(!skipAnswered)}
-                  showVoiceRoleplayButton={lessonPlan ? isSoftSkillsPlan(lessonPlan) && !!lessonPlan.rolePlayPersona : false}
+                  showVoiceRoleplayButton={false}
                   onStartVoiceRoleplay={() => setShowVoiceRoleplay(true)}
                   selectedScenario={selectedPreset}
+                  googleAccessToken={googleAccessToken}
+                  onRequestGoogleAuth={googleLogin}
                />
              )}
+            </div>
+
           </div>
+        </main>
+      )}
 
-        </div>
-      </main>
-
-      {/* Voice Roleplay Modal */}
-      {showVoiceRoleplay && lessonPlan && isSoftSkillsPlan(lessonPlan) && (
+      {/* Voice Roleplay Modal - Only for soft skills mode */}
+      {showVoiceRoleplay && skillMode === 'soft' && lessonPlan && isSoftSkillsPlan(lessonPlan) && (
         <VoiceRoleplay
           lessonPlan={lessonPlan}          selectedScenario={selectedPreset}          onClose={() => setShowVoiceRoleplay(false)}
           onPauseVideo={() => setIsPlaying(false)}
+        />
+      )}
+
+      {/* Export Modal */}
+      {lessonPlan && (
+        <ExportModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          lessonPlan={lessonPlan}
+          sessionHistory={sessionHistory}
+          studyPack={studyPack}
+          videoUrl={lessonPlan.videoUrl}
+          googleAccessToken={googleAccessToken}
+          onRequestGoogleAuth={googleLogin}
         />
       )}
 

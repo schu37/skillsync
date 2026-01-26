@@ -406,36 +406,78 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
         console.log(`🔊 Browser TTS voice: ${selectedVoice.name}`);
       }
       
-      // Adjust prosody based on emotion
-      switch (emotion) {
-        case 'impatient':
-        case 'frustrated':
-          utterance.rate = 1.2;
-          utterance.pitch = 1.15;
-          utterance.volume = 0.9;
-          break;
-        case 'grateful':
-        case 'friendly':
-          utterance.rate = 0.95;
-          utterance.pitch = 1.1;
-          utterance.volume = 1.0;
-          break;
-        case 'angry':
-        case 'dismissive':
-          utterance.rate = 1.1;
-          utterance.pitch = 0.85;
-          utterance.volume = 0.95;
-          break;
-        case 'skeptical':
-        case 'curious':
-          utterance.rate = 0.92;
-          utterance.pitch = 0.95;
-          utterance.volume = 0.9;
-          break;
-        default:
-          utterance.rate = 1.0;
-          utterance.pitch = 1.0;
-          utterance.volume = 1.0;
+      // Adjust prosody based on emotion - more dramatic variations for realism
+      const emotionLower = emotion.toLowerCase();
+      if (emotionLower.includes('angry') || emotionLower.includes('furious') || emotionLower.includes('rage')) {
+        // ANGRY: Fast, loud, high pitch variation
+        utterance.rate = 1.5;
+        utterance.pitch = 1.3;
+        utterance.volume = 1.0;
+      } else if (emotionLower.includes('impatient') || emotionLower.includes('frustrated') || emotionLower.includes('annoyed') || emotionLower.includes('irritated')) {
+        // IMPATIENT/FRUSTRATED: Fast, slightly louder, clipped
+        utterance.rate = 1.4;
+        utterance.pitch = 1.2;
+        utterance.volume = 1.0;
+      } else if (emotionLower.includes('dismissive') || emotionLower.includes('condescending') || emotionLower.includes('bored')) {
+        // DISMISSIVE: Slightly fast, low pitch, lower volume (disinterested)
+        utterance.rate = 1.2;
+        utterance.pitch = 0.8;
+        utterance.volume = 0.85;
+      } else if (emotionLower.includes('excited') || emotionLower.includes('enthusiastic') || emotionLower.includes('happy')) {
+        // EXCITED: Fast, high pitch, loud
+        utterance.rate = 1.35;
+        utterance.pitch = 1.25;
+        utterance.volume = 1.0;
+      } else if (emotionLower.includes('grateful') || emotionLower.includes('thankful') || emotionLower.includes('appreciative')) {
+        // GRATEFUL: Warm, slower, gentle
+        utterance.rate = 0.9;
+        utterance.pitch = 1.15;
+        utterance.volume = 0.95;
+      } else if (emotionLower.includes('friendly') || emotionLower.includes('warm') || emotionLower.includes('welcoming')) {
+        // FRIENDLY: Medium pace, slightly higher pitch
+        utterance.rate = 1.0;
+        utterance.pitch = 1.1;
+        utterance.volume = 1.0;
+      } else if (emotionLower.includes('skeptical') || emotionLower.includes('doubtful') || emotionLower.includes('suspicious')) {
+        // SKEPTICAL: Slower, questioning tone
+        utterance.rate = 0.85;
+        utterance.pitch = 0.9;
+        utterance.volume = 0.9;
+      } else if (emotionLower.includes('curious') || emotionLower.includes('interested') || emotionLower.includes('intrigued')) {
+        // CURIOUS: Slightly slower, rising intonation feel
+        utterance.rate = 0.95;
+        utterance.pitch = 1.1;
+        utterance.volume = 0.95;
+      } else if (emotionLower.includes('sad') || emotionLower.includes('disappointed') || emotionLower.includes('dejected')) {
+        // SAD: Slow, low pitch, quiet
+        utterance.rate = 0.75;
+        utterance.pitch = 0.85;
+        utterance.volume = 0.8;
+      } else if (emotionLower.includes('nervous') || emotionLower.includes('anxious') || emotionLower.includes('worried')) {
+        // NERVOUS: Slightly fast, higher pitch, softer
+        utterance.rate = 1.15;
+        utterance.pitch = 1.15;
+        utterance.volume = 0.85;
+      } else if (emotionLower.includes('confident') || emotionLower.includes('assertive') || emotionLower.includes('commanding')) {
+        // CONFIDENT: Strong, clear, medium-slow
+        utterance.rate = 0.95;
+        utterance.pitch = 0.95;
+        utterance.volume = 1.0;
+      } else if (emotionLower.includes('sarcastic') || emotionLower.includes('mocking')) {
+        // SARCASTIC: Slower with exaggerated pitch
+        utterance.rate = 0.9;
+        utterance.pitch = 1.2;
+        utterance.volume = 0.95;
+      } else if (emotionLower.includes('urgent') || emotionLower.includes('alarmed') || emotionLower.includes('panicked')) {
+        // URGENT: Very fast, high, loud
+        utterance.rate = 1.6;
+        utterance.pitch = 1.35;
+        utterance.volume = 1.0;
+      } else {
+        // NEUTRAL: Default
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
       }
       
       utterance.onend = () => {

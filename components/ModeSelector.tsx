@@ -63,9 +63,6 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
             📺 General
           </button>
         </div>
-        <span className="text-xs text-slate-400 hidden sm:inline">
-          (auto-detected from video)
-        </span>
       </div>
 
       {/* Preset Dropdown - hide for 'others' mode */}
@@ -84,7 +81,7 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
               ${disabled ? 'cursor-not-allowed opacity-50 bg-slate-50' : ''}
             `}
           >
-            <option value="">Auto-detect from video</option>
+            <option value="">Select a {skillMode === 'soft' ? 'scenario' : 'project type'}...</option>
             {presets.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.icon} {preset.label}
