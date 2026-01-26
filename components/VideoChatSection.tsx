@@ -2,22 +2,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import { LessonPlan, isSoftSkillsPlan } from '../types';
 import { videoChatMessage, roleplayChat } from '../services/geminiService';
 import { ROLEPLAY_PERSONAS, SOFT_SKILL_PRESETS } from '../constants';
-
-// Simple markdown renderer for chat messages
-const renderMarkdown = (text: string) => {
-  // Convert **bold** to <strong>
-  let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  // Convert *italic* to <em>
-  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  // Convert `code` to <code>
-  formatted = formatted.replace(/`(.*?)`/g, '<code class="bg-slate-100 px-1 rounded text-sm">$1</code>');
-  return formatted;
-};
+import { renderMarkdown } from '../utils';
+import { exportChatAsMarkdown, exportChatToGoogleDocs } from '../services/exportService';
 
 interface VideoChatSectionProps {
   lessonPlan: LessonPlan;
   selectedScenario?: string; // NEW: user-selected scenario from dropdown
   onStartVoiceRoleplay?: () => void; // NEW: callback to open voice roleplay modal
+  googleAccessToken?: string | null; // For Google Docs export
+  onRequestGoogleAuth?: () => void; // Callback to trigger OAuth
+  skillMode?: 'soft' | 'technical' | 'others'; // Current skill mode from UI
 }
 
 type ChatMode = 'discuss' | 'roleplay';
@@ -28,14 +22,23 @@ interface Message {
   timestamp: Date;
 }
 
-const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan, selectedScenario, onStartVoiceRoleplay }) => {
+const VideoChatSection: React.FC<VideoChatSectionProps> = ({ 
+  lessonPlan, 
+  selectedScenario, 
+  onStartVoiceRoleplay,
+  googleAccessToken,
+  onRequestGoogleAuth,
+  skillMode
+}) => {
   const [chatMode, setChatMode] = useState<ChatMode>('discuss');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const hasRoleplay = isSoftSkillsPlan(lessonPlan) && lessonPlan.rolePlayPersona;
+  const hasRoleplay = (skillMode === 'soft' || skillMode === undefined) && isSoftSkillsPlan(lessonPlan) && lessonPlan.rolePlayPersona;
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -125,6 +128,41 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan, selecte
     }
   };
 
+  const handleExportMarkdown = () => {
+    exportChatAsMarkdown(messages, chatMode, lessonPlan.summary);
+    setShowExportMenu(false);
+  };
+
+  const handleExportGoogleDocs = async () => {
+    if (!googleAccessToken && onRequestGoogleAuth) {
+      onRequestGoogleAuth();
+      return;
+    }
+
+    if (!googleAccessToken) {
+      alert('Please sign in with Google to export to Google Docs');
+      return;
+    }
+
+    setIsExporting(true);
+    setShowExportMenu(false);
+    
+    try {
+      const result = await exportChatToGoogleDocs(
+        messages,
+        chatMode,
+        lessonPlan.summary,
+        googleAccessToken
+      );
+      window.open(result.documentUrl, '_blank');
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Failed to export to Google Docs. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
       {/* Header - Sticky */}
@@ -137,12 +175,50 @@ const VideoChatSection: React.FC<VideoChatSectionProps> = ({ lessonPlan, selecte
             Chat
           </h2>
           {messages.length > 0 && (
-            <button
-              onClick={() => setMessages([])}
-              className="text-xs text-slate-500 hover:text-slate-700"
-            >
-              Clear chat
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Export Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  disabled={isExporting}
+                  className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isExporting ? 'Exporting...' : '📥 Export'}
+                </button>
+                
+                {showExportMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowExportMenu(false)}
+                    />
+                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-20">
+                      <button
+                        onClick={handleExportMarkdown}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <span>📄</span>
+                        <span>Download .md</span>
+                      </button>
+                      <button
+                        onClick={handleExportGoogleDocs}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <span>📝</span>
+                        <span>Export to Google Docs</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              <button
+                onClick={() => setMessages([])}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                Clear
+              </button>
+            </div>
           )}
         </div>
 

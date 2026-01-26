@@ -415,3 +415,164 @@ const generatePlainTextContent = (
 
   return text;
 };
+
+// ============================================
+// CHAT EXPORT
+// ============================================
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
+export const exportChatAsMarkdown = (
+  messages: ChatMessage[],
+  chatMode: 'discuss' | 'roleplay',
+  lessonPlanTitle: string
+): void => {
+  const markdown = generateChatMarkdown(messages, chatMode, lessonPlanTitle);
+  const filename = `${sanitizeFilename(lessonPlanTitle)}-chat-${chatMode}.md`;
+  downloadFile(markdown, filename, 'text/markdown');
+};
+
+export const generateChatMarkdown = (
+  messages: ChatMessage[],
+  chatMode: 'discuss' | 'roleplay',
+  lessonPlanTitle: string
+): string => {
+  const modeLabel = chatMode === 'roleplay' ? '🎭 Roleplay Practice' : '💬 Video Discussion';
+  
+  let markdown = `# ${lessonPlanTitle} - ${modeLabel}
+
+**Mode:** ${modeLabel}  
+**Messages:** ${messages.length}  
+**Exported:** ${new Date().toLocaleString()}
+
+---
+
+`;
+
+  messages.forEach((msg, idx) => {
+    const roleLabel = msg.role === 'user' ? '👤 You' : '🤖 AI';
+    const timestamp = msg.timestamp.toLocaleTimeString();
+    
+    markdown += `## ${roleLabel} - ${timestamp}\n\n`;
+    markdown += `${msg.content}\n\n`;
+    
+    if (idx < messages.length - 1) {
+      markdown += `---\n\n`;
+    }
+  });
+
+  return markdown;
+};
+
+export const exportChatToGoogleDocs = async (
+  messages: ChatMessage[],
+  chatMode: 'discuss' | 'roleplay',
+  lessonPlanTitle: string,
+  accessToken: string
+): Promise<{ documentUrl: string }> => {
+  const modeLabel = chatMode === 'roleplay' ? '🎭 Roleplay Practice' : '💬 Video Discussion';
+  const title = `${lessonPlanTitle} - ${modeLabel}`;
+
+  // Create document
+  const createResponse = await fetch('https://docs.googleapis.com/v1/documents', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text();
+    throw new Error(`Failed to create document: ${createResponse.status} ${errorText}`);
+  }
+
+  const doc = await createResponse.json();
+  const documentId = doc.documentId;
+
+  // Build content
+  const requests: any[] = [];
+  let currentIndex = 1;
+
+  // Title
+  requests.push({
+    insertText: {
+      location: { index: currentIndex },
+      text: `${lessonPlanTitle} - ${modeLabel}\n\n`,
+    },
+  });
+  currentIndex += lessonPlanTitle.length + modeLabel.length + 5;
+
+  // Metadata
+  const metadata = `Mode: ${modeLabel}\nMessages: ${messages.length}\nExported: ${new Date().toLocaleString()}\n\n`;
+  requests.push({
+    insertText: {
+      location: { index: currentIndex },
+      text: metadata,
+    },
+  });
+  currentIndex += metadata.length;
+
+  // Divider
+  requests.push({
+    insertText: {
+      location: { index: currentIndex },
+      text: '─'.repeat(50) + '\n\n',
+    },
+  });
+  currentIndex += 52;
+
+  // Messages
+  messages.forEach((msg, idx) => {
+    const roleLabel = msg.role === 'user' ? '👤 You' : '🤖 AI';
+    const timestamp = msg.timestamp.toLocaleTimeString();
+    const header = `${roleLabel} - ${timestamp}\n\n`;
+    const content = `${msg.content}\n\n`;
+    
+    requests.push({
+      insertText: {
+        location: { index: currentIndex },
+        text: header,
+      },
+    });
+    currentIndex += header.length;
+
+    requests.push({
+      insertText: {
+        location: { index: currentIndex },
+        text: content,
+      },
+    });
+    currentIndex += content.length;
+
+    if (idx < messages.length - 1) {
+      const divider = '─'.repeat(50) + '\n\n';
+      requests.push({
+        insertText: {
+          location: { index: currentIndex },
+          text: divider,
+        },
+      });
+      currentIndex += divider.length;
+    }
+  });
+
+  // Apply formatting
+  await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ requests }),
+  });
+
+  return {
+    documentUrl: `https://docs.google.com/document/d/${documentId}/edit`,
+  };
+};

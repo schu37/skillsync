@@ -229,13 +229,26 @@ const ModeDetectionSchema: Schema = {
   required: ["isEducational", "confidence", "reasoning"],
 };
 
+// ============================================
+// MODE AUTO-DETECTION (Exported)
+// ============================================
+
+export interface ModeDetectionResult {
+  mode: SkillMode;
+  confidence: number;
+  reasoning: string;
+}
+
 /**
  * Auto-detect whether video is technical or soft skills
+ * Lightweight API call that just analyzes the video category
  */
-const detectVideoMode = async (
-  ai: GoogleGenAI,
-  youtubeUrl: string
-): Promise<{ mode: SkillMode; confidence: number; reasoning: string }> => {
+export const detectVideoMode = async (
+  videoUrlOrId: string
+): Promise<ModeDetectionResult> => {
+  const youtubeUrl = normalizeYouTubeUrl(videoUrlOrId);
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  
   const systemPrompt = `
 You are analyzing a video to determine if it contains educational/learnable content and classify it.
 
@@ -358,16 +371,13 @@ export const generateLessonPlan = async (
     return regenerateQuestionsOnly(videoUrlOrId, userSelectedMode, options);
   }
   
-  // Check cache first
+  // Check cache first (only for the requested mode)
   if (!options.forceRefresh) {
-    // Try both modes in cache
-    const cachedSoft = videoCache.get(youtubeUrl, 'soft');
-    const cachedTech = videoCache.get(youtubeUrl, 'technical');
+    const cached = videoCache.get(youtubeUrl, userSelectedMode);
     
-    if (cachedSoft || cachedTech) {
-      const cached = cachedSoft || cachedTech;
-      logApi('generateLessonPlan - CACHE HIT', { url: youtubeUrl, mode: cached!.mode });
-      return cached!;
+    if (cached) {
+      logApi('generateLessonPlan - CACHE HIT', { url: youtubeUrl, mode: cached.mode });
+      return cached;
     }
   }
   
@@ -375,46 +385,23 @@ export const generateLessonPlan = async (
   
   const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
-  // Auto-detect mode if user selected 'soft' but video might be technical
-  // This helps catch misclassifications
-  let effectiveMode = userSelectedMode;
-  
-  // Only auto-detect if user hasn't forced a specific mode via preset selection
-  // This allows users to override the detection for edge cases (e.g., silent cooking videos)
-  if (!options.projectType && !options.scenarioPreset) {
-    const detection = await detectVideoMode(ai, youtubeUrl);
-    
-    // If high confidence detection differs from user selection, use detected mode
-    if (detection.confidence >= 70 && detection.mode !== userSelectedMode) {
-      logApi('generateLessonPlan - Mode override', { 
-        userSelected: userSelectedMode, 
-        detected: detection.mode,
-        confidence: detection.confidence,
-        reasoning: detection.reasoning
-      });
-      effectiveMode = detection.mode;
-    }
-  } else {
-    // User explicitly selected a preset - respect their choice and skip detection
-    logApi('generateLessonPlan - Preset selected, skipping mode detection', {
-      userMode: userSelectedMode,
-      preset: options.projectType || options.scenarioPreset
-    });
-  }
-
+  // Generate plan based on user-selected mode
+  // Auto-detection is disabled to respect user choice and avoid API overload
   let plan: LessonPlan;
-  if (effectiveMode === 'technical') {
+  if (userSelectedMode === 'technical') {
     plan = await generateTechnicalLessonPlan(ai, youtubeUrl, options.projectType);
-  } else if (effectiveMode === 'others') {
+  } else if (userSelectedMode === 'others') {
     // For 'others' mode, generate a basic plan without roleplay
-    plan = await generateSoftSkillsLessonPlan(ai, youtubeUrl, undefined, undefined, true);
+    const othersPlan = await generateSoftSkillsLessonPlan(ai, youtubeUrl, undefined, undefined, true);
+    // Override mode to 'others' since generateSoftSkillsLessonPlan defaults to 'soft'
+    plan = { ...othersPlan, mode: 'others' as const };
   } else {
     plan = await generateSoftSkillsLessonPlan(ai, youtubeUrl, options.scenarioPreset);
   }
   
-  // Cache both the full plan AND the video context separately
-  videoCache.set(youtubeUrl, effectiveMode, plan);
-  videoContextCache.set(youtubeUrl, effectiveMode, videoContextCache.extractFromPlan(plan));
+  // Cache based on the user-selected mode, not the auto-detected mode
+  videoCache.set(youtubeUrl, userSelectedMode, plan);
+  videoContextCache.set(youtubeUrl, userSelectedMode, videoContextCache.extractFromPlan(plan));
   
   return plan;
 };

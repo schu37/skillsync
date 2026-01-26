@@ -4,6 +4,8 @@
 
 export enum AppMode {
   IDLE = 'IDLE',
+  DETECTING_MODE = 'DETECTING_MODE',  // Auto-detecting video category
+  MODE_DETECTED = 'MODE_DETECTED',    // Showing detected mode, awaiting confirmation
   LOADING_PLAN = 'LOADING_PLAN',
   PLAN_READY = 'PLAN_READY',
   PLAYING = 'PLAYING',
@@ -137,8 +139,13 @@ export interface TechnicalLessonPlan extends BaseLessonPlan {
   requiredPrecautions?: string[];
 }
 
+export interface OthersLessonPlan extends BaseLessonPlan {
+  mode: 'others';
+  scenarioPreset?: string; // May have a fallback scenario from soft skills generation
+}
+
 // Union type for easy handling
-export type LessonPlan = SoftSkillsLessonPlan | TechnicalLessonPlan;
+export type LessonPlan = SoftSkillsLessonPlan | TechnicalLessonPlan | OthersLessonPlan;
 
 // Type guard
 export const isTechnicalPlan = (plan: LessonPlan): plan is TechnicalLessonPlan =>
@@ -147,6 +154,10 @@ export const isTechnicalPlan = (plan: LessonPlan): plan is TechnicalLessonPlan =
 // Make sure these type guards are exported
 export const isSoftSkillsPlan = (plan: LessonPlan): plan is SoftSkillsLessonPlan => {
   return plan.mode === 'soft';
+};
+
+export const isOthersPlan = (plan: LessonPlan): plan is OthersLessonPlan => {
+  return plan.mode === 'others';
 };
 
 // ============================================

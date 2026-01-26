@@ -1,82 +1,187 @@
-import React, { useState } from 'react';
-import { TechnicalLessonPlan, Component, Tool, BuildStep, DesignDecision, StopPoint, Evaluation, AppMode } from '../types';
+/**
+ * LearningPanel - Unified panel component for all learning modes
+ * 
+ * Consolidates TechnicalPanel, InteractionPanel, and OthersPanel
+ * into a single component with mode-specific content.
+ */
+
+import React, { useState, useMemo } from 'react';
+import { 
+  AppMode, 
+  LessonPlan, 
+  StopPoint, 
+  Evaluation, 
+  SkillMode,
+  isTechnicalPlan, 
+  isSoftSkillsPlan,
+  TechnicalLessonPlan,
+  SoftSkillsLessonPlan,
+  Component,
+  Tool,
+  BuildStep,
+  DesignDecision,
+} from '../types';
 import { formatTimestamp, copyToClipboard } from '../utils';
+import { evaluateAnswer } from '../services/geminiService';
 import { FeedbackDisplay, LoadingSpinner } from './shared';
 import SafetyBanner from './SafetyBanner';
 import NotesSection from './NotesSection';
 import VideoChatSection from './VideoChatSection';
+import KnowledgeGraph from './KnowledgeGraph';
 
-interface TechnicalPanelProps {
-  plan: TechnicalLessonPlan;
-  onSeekToTimestamp?: (timestamp: number) => void;
+// ============================================
+// TYPES
+// ============================================
+
+interface LearningPanelProps {
+  // Core props
+  lessonPlan: LessonPlan;
+  skillMode: SkillMode; // User's selected mode (should match lessonPlan.mode)
+  mode: AppMode;
+  
   // Q&A props
   currentStopPoint?: StopPoint | null;
   currentStopIndex?: number;
   onAnswerSubmit?: (answer: string, evaluation: Evaluation) => void;
   onContinue?: () => void;
   onSelectStopPoint?: (index: number) => void;
-  mode?: AppMode;
+  onSeekToTimestamp?: (timestamp: number) => void;
   sessionHistory?: { question: string; answer: string; evaluation: Evaluation }[];
+  answeredQuestionIds?: Set<string>;
+  skipAnswered?: boolean;
+  onToggleSkipAnswered?: () => void;
+  
+  // Completion state
+  studyPack?: { markdown: string } | null;
+  
+  // Voice roleplay
+  showVoiceRoleplayButton?: boolean;
+  onStartVoiceRoleplay?: () => void;
+  selectedScenario?: string;
+  
+  // Export/Auth
   googleAccessToken?: string | null;
   onRequestGoogleAuth?: () => void;
 }
 
-type TabId = 'overview' | 'parts' | 'tools' | 'steps' | 'design' | 'qa' | 'notes' | 'chat';
+type TabConfig = {
+  id: string;
+  label: string;
+  icon: string;
+  count?: number;
+  modes: SkillMode[]; // Which modes show this tab
+};
 
-const TechnicalPanel: React.FC<TechnicalPanelProps> = ({ 
-  plan, 
-  onSeekToTimestamp,
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
+const LearningPanel: React.FC<LearningPanelProps> = ({
+  lessonPlan,
+  skillMode,
+  mode,
   currentStopPoint,
   currentStopIndex = 0,
   onAnswerSubmit,
   onContinue,
   onSelectStopPoint,
-  mode,
-  sessionHistory,
+  onSeekToTimestamp,
+  sessionHistory = [],
+  answeredQuestionIds = new Set(),
+  skipAnswered = false,
+  onToggleSkipAnswered,
+  studyPack,
+  showVoiceRoleplayButton = false,
+  onStartVoiceRoleplay,
+  selectedScenario,
   googleAccessToken,
   onRequestGoogleAuth,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const [answer, setAnswer] = useState('');
-  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('overview');
+  
+  // Use lessonPlan.mode as the source of truth for mode-specific behavior
+  const planMode = lessonPlan.mode;
+  
+  // Build tab configuration based on mode
+  const tabs = useMemo((): TabConfig[] => {
+    const baseTabs: TabConfig[] = [];
+    
+    if (isTechnicalPlan(lessonPlan)) {
+      baseTabs.push(
+        { id: 'overview', label: 'Overview', icon: '📋', modes: ['technical'] },
+        { id: 'parts', label: 'Parts', icon: '📦', count: lessonPlan.components.length, modes: ['technical'] },
+        { id: 'tools', label: 'Tools', icon: '🛠️', count: lessonPlan.tools.length, modes: ['technical'] },
+        { id: 'steps', label: 'Steps', icon: '📝', count: lessonPlan.buildSteps.length, modes: ['technical'] },
+        { id: 'design', label: 'Why?', icon: '🧠', count: lessonPlan.designDecisions.length, modes: ['technical'] },
+      );
+    }
+    
+    // Q&A tab for technical and soft modes
+    if (lessonPlan.stopPoints?.length > 0) {
+      baseTabs.push({
+        id: 'qa',
+        label: 'Q&A',
+        icon: '❓',
+        count: lessonPlan.stopPoints.length,
+        modes: ['technical', 'soft'],
+      });
+    }
+    
+    // Knowledge graph tab (all modes)
+    baseTabs.push({
+      id: 'graph',
+      label: 'Graph',
+      icon: '🕸️',
+      modes: ['technical', 'soft', 'others'],
+    });
+    
+    // Common tabs (all modes)
+    baseTabs.push(
+      { id: 'notes', label: 'Notes', icon: '📝', modes: ['technical', 'soft', 'others'] },
+      { id: 'chat', label: 'Chat', icon: '💬', modes: ['technical', 'soft', 'others'] },
+    );
+    
+    // Filter to only show tabs for current mode
+    return baseTabs.filter(tab => tab.modes.includes(planMode));
+  }, [lessonPlan, planMode]);
 
-  const tabs: { id: TabId; label: string; icon: string; count?: number }[] = [
-    { id: 'overview', label: 'Overview', icon: '📋' },
-    { id: 'parts', label: 'Parts', icon: '📦', count: plan.components.length },
-    { id: 'tools', label: 'Tools', icon: '🛠️', count: plan.tools.length },
-    { id: 'steps', label: 'Steps', icon: '📝', count: plan.buildSteps.length },
-    { id: 'design', label: 'Why?', icon: '🧠', count: plan.designDecisions.length },
-    { id: 'qa', label: 'Q&A', icon: '❓', count: plan.stopPoints?.length || 0 },
-    { id: 'notes', label: 'Notes', icon: '📝' },
-    { id: 'chat', label: 'Chat', icon: '💬' },
-  ];
+  // Set default tab based on mode
+  React.useEffect(() => {
+    if (planMode === 'technical') {
+      setActiveTab('overview');
+    } else if (planMode === 'soft') {
+      setActiveTab(lessonPlan.stopPoints?.length > 0 ? 'qa' : 'notes');
+    } else {
+      setActiveTab('notes');
+    }
+  }, [planMode, lessonPlan]);
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-      {/* Safety Banner */}
-      <SafetyBanner plan={plan} />
+      {/* Mode-specific banners */}
+      {planMode === 'technical' && isTechnicalPlan(lessonPlan) && (
+        <SafetyBanner plan={lessonPlan} />
+      )}
+      
+      {planMode === 'others' && (
+        <div className="bg-amber-50 border-b border-amber-200 p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div className="flex-1">
+              <h4 className="font-bold text-amber-800 mb-1">General Content Mode</h4>
+              <p className="text-amber-700 text-sm">
+                This video wasn't classified as structured educational content. You can still use AI tools to explore it, 
+                but questions and analysis may be limited.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
-      <div className="p-4 border-b border-slate-100 bg-slate-50">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="px-2 py-1 text-xs font-bold text-emerald-600 bg-emerald-100 rounded-md uppercase tracking-wide">
-            {plan.projectType}
-          </span>
-          <span className={`px-2 py-1 text-xs font-medium rounded-md ${
-            plan.difficultyLevel === 'beginner' ? 'bg-green-100 text-green-700' :
-            plan.difficultyLevel === 'intermediate' ? 'bg-amber-100 text-amber-700' :
-            'bg-red-100 text-red-700'
-          }`}>
-            {plan.difficultyLevel}
-          </span>
-          {plan.estimatedBuildTime && (
-            <span className="text-xs text-slate-500">⏱️ {plan.estimatedBuildTime}</span>
-          )}
-        </div>
-        <h2 className="text-lg font-bold text-slate-800 leading-tight">{plan.summary}</h2>
-      </div>
+      <PanelHeader lessonPlan={lessonPlan} skillMode={planMode} />
 
-      {/* Tabs - Scrollable with improved visibility */}
+      {/* Tabs */}
       <div className="flex border-b border-slate-100 bg-slate-50 px-1 overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => (
           <button
@@ -104,24 +209,39 @@ const TechnicalPanel: React.FC<TechnicalPanelProps> = ({
 
       {/* Content - Use hidden divs to preserve state across tab switches */}
       <div className="flex-1 overflow-hidden">
-        <div className={activeTab === 'overview' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <OverviewTab plan={plan} />
-        </div>
-        <div className={activeTab === 'parts' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <PartsTab components={plan.components} />
-        </div>
-        <div className={activeTab === 'tools' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <ToolsTab tools={plan.tools} />
-        </div>
-        <div className={activeTab === 'steps' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <StepsTab steps={plan.buildSteps} onSeek={onSeekToTimestamp} formatTimestamp={formatTimestamp} />
-        </div>
-        <div className={activeTab === 'design' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <DesignTab decisions={plan.designDecisions} onSeek={onSeekToTimestamp} formatTimestamp={formatTimestamp} />
-        </div>
+        {/* Technical-specific tabs */}
+        {isTechnicalPlan(lessonPlan) && (
+          <>
+            <div className={activeTab === 'overview' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
+              <OverviewTab plan={lessonPlan} />
+            </div>
+            <div className={activeTab === 'parts' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
+              <PartsTab components={lessonPlan.components} />
+            </div>
+            <div className={activeTab === 'tools' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
+              <ToolsTab tools={lessonPlan.tools} />
+            </div>
+            <div className={activeTab === 'steps' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
+              <StepsTab 
+                steps={lessonPlan.buildSteps} 
+                onSeek={onSeekToTimestamp} 
+                formatTimestamp={formatTimestamp} 
+              />
+            </div>
+            <div className={activeTab === 'design' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
+              <DesignTab 
+                decisions={lessonPlan.designDecisions} 
+                onSeek={onSeekToTimestamp} 
+                formatTimestamp={formatTimestamp} 
+              />
+            </div>
+          </>
+        )}
+
+        {/* Q&A tab (shared between technical and soft) */}
         <div className={activeTab === 'qa' ? 'h-full overflow-y-auto p-4' : 'hidden'}>
-          <QATab 
-            plan={plan}
+          <QATab
+            lessonPlan={lessonPlan}
             currentStopPoint={currentStopPoint}
             currentStopIndex={currentStopIndex}
             onAnswerSubmit={onAnswerSubmit}
@@ -130,16 +250,29 @@ const TechnicalPanel: React.FC<TechnicalPanelProps> = ({
             onSeekToTimestamp={onSeekToTimestamp}
             mode={mode}
             sessionHistory={sessionHistory}
+            answeredQuestionIds={answeredQuestionIds}
+            showVoiceRoleplayButton={showVoiceRoleplayButton && planMode === 'soft'}
+            onStartVoiceRoleplay={onStartVoiceRoleplay}
           />
         </div>
+
+        {/* Knowledge Graph tab */}
+        <div className={activeTab === 'graph' ? 'h-full overflow-y-auto' : 'hidden'}>
+          <KnowledgeGraph lessonPlan={lessonPlan} onSeekToTimestamp={onSeekToTimestamp} />
+        </div>
+
+        {/* Common tabs */}
         <div className={activeTab === 'notes' ? 'h-full' : 'hidden'}>
-          <NotesSection lessonPlan={plan} />
+          <NotesSection lessonPlan={lessonPlan} />
         </div>
         <div className={activeTab === 'chat' ? 'h-full' : 'hidden'}>
-          <VideoChatSection 
-            lessonPlan={plan}
+          <VideoChatSection
+            lessonPlan={lessonPlan}
+            selectedScenario={selectedScenario}
+            onStartVoiceRoleplay={onStartVoiceRoleplay}
             googleAccessToken={googleAccessToken}
             onRequestGoogleAuth={onRequestGoogleAuth}
+            skillMode={skillMode}
           />
         </div>
       </div>
@@ -148,7 +281,64 @@ const TechnicalPanel: React.FC<TechnicalPanelProps> = ({
 };
 
 // ============================================
-// TAB COMPONENTS
+// HEADER COMPONENT
+// ============================================
+
+const PanelHeader: React.FC<{ lessonPlan: LessonPlan; skillMode: SkillMode }> = ({ 
+  lessonPlan, 
+  skillMode 
+}) => {
+  const getBadgeColor = () => {
+    switch (skillMode) {
+      case 'technical': return 'text-emerald-600 bg-emerald-100';
+      case 'soft': return 'text-purple-600 bg-purple-100';
+      default: return 'text-slate-600 bg-slate-200';
+    }
+  };
+
+  const getLabel = () => {
+    if (isTechnicalPlan(lessonPlan)) return lessonPlan.projectType;
+    if (isSoftSkillsPlan(lessonPlan)) return lessonPlan.scenarioPreset || 'Soft Skills';
+    return 'General Content';
+  };
+
+  return (
+    <div className="p-4 border-b border-slate-100 bg-slate-50">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className={`px-2 py-1 text-xs font-bold rounded-md uppercase tracking-wide ${getBadgeColor()}`}>
+          {getLabel()}
+        </span>
+        
+        {isTechnicalPlan(lessonPlan) && (
+          <>
+            <span className={`px-2 py-1 text-xs font-medium rounded-md ${
+              lessonPlan.difficultyLevel === 'beginner' ? 'bg-green-100 text-green-700' :
+              lessonPlan.difficultyLevel === 'intermediate' ? 'bg-amber-100 text-amber-700' :
+              'bg-red-100 text-red-700'
+            }`}>
+              {lessonPlan.difficultyLevel}
+            </span>
+            {lessonPlan.estimatedBuildTime && (
+              <span className="text-xs text-slate-500">⏱️ {lessonPlan.estimatedBuildTime}</span>
+            )}
+          </>
+        )}
+      </div>
+      <h2 className="text-lg font-bold text-slate-800 leading-tight">{lessonPlan.summary}</h2>
+      {lessonPlan.videoContext && (
+        <details className="mt-2">
+          <summary className="text-sm text-slate-600 cursor-pointer hover:text-indigo-600">
+            {lessonPlan.videoContext.slice(0, 100)}... <span className="text-indigo-500 text-xs">(click to expand)</span>
+          </summary>
+          <p className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{lessonPlan.videoContext}</p>
+        </details>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// TECHNICAL TAB COMPONENTS
 // ============================================
 
 const OverviewTab: React.FC<{ plan: TechnicalLessonPlan }> = ({ plan }) => (
@@ -181,7 +371,12 @@ const OverviewTab: React.FC<{ plan: TechnicalLessonPlan }> = ({ plan }) => (
 
     <div>
       <h3 className="text-sm font-bold text-slate-700 mb-2">Video Context</h3>
-      <p className="text-sm text-slate-600 leading-relaxed">{plan.videoContext.slice(0, 500)}...</p>
+      <details>
+        <summary className="text-sm text-slate-600 cursor-pointer hover:text-indigo-600">
+          {plan.videoContext.slice(0, 200)}... <span className="text-indigo-500 text-xs">(click to expand)</span>
+        </summary>
+        <p className="text-sm text-slate-600 leading-relaxed mt-2 whitespace-pre-wrap">{plan.videoContext}</p>
+      </details>
     </div>
   </div>
 );
@@ -412,8 +607,12 @@ const DesignTab: React.FC<{
   </div>
 );
 
-const QATab: React.FC<{
-  plan: TechnicalLessonPlan;
+// ============================================
+// Q&A TAB COMPONENT (Shared)
+// ============================================
+
+interface QATabProps {
+  lessonPlan: LessonPlan;
   currentStopPoint?: StopPoint | null;
   currentStopIndex?: number;
   onAnswerSubmit?: (answer: string, evaluation: Evaluation) => void;
@@ -422,22 +621,32 @@ const QATab: React.FC<{
   onSeekToTimestamp?: (timestamp: number) => void;
   mode?: AppMode;
   sessionHistory?: { question: string; answer: string; evaluation: Evaluation }[];
-}> = ({ 
-  plan, 
-  currentStopPoint, 
+  answeredQuestionIds?: Set<string>;
+  showVoiceRoleplayButton?: boolean;
+  onStartVoiceRoleplay?: () => void;
+}
+
+const QATab: React.FC<QATabProps> = ({
+  lessonPlan,
+  currentStopPoint,
   currentStopIndex = 0,
   onAnswerSubmit,
   onContinue,
   onSelectStopPoint,
   onSeekToTimestamp,
   mode,
-  sessionHistory = []
+  sessionHistory = [],
+  answeredQuestionIds = new Set(),
+  showVoiceRoleplayButton,
+  onStartVoiceRoleplay,
 }) => {
   const [answer, setAnswer] = useState('');
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [currentEvaluation, setCurrentEvaluation] = useState<Evaluation | null>(null);
 
-  if (!plan.stopPoints || plan.stopPoints.length === 0) {
+  const stopPoints = lessonPlan.stopPoints || [];
+
+  if (stopPoints.length === 0) {
     return (
       <div className="text-center py-12 text-slate-500">
         <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -447,6 +656,15 @@ const QATab: React.FC<{
         </div>
         <p className="font-medium text-lg">No Q&A questions available</p>
         <p className="text-sm mt-2">This video doesn't have comprehension questions.</p>
+        
+        {showVoiceRoleplayButton && onStartVoiceRoleplay && (
+          <button
+            onClick={onStartVoiceRoleplay}
+            className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            🎭 Start Voice Roleplay Instead
+          </button>
+        )}
       </div>
     );
   }
@@ -456,9 +674,7 @@ const QATab: React.FC<{
     
     setIsEvaluating(true);
     try {
-      const { evaluateAnswer } = await import('../services/geminiService');
-      const evaluation = await evaluateAnswer(currentStopPoint, answer, plan);
-      
+      const evaluation = await evaluateAnswer(currentStopPoint, answer, lessonPlan);
       setCurrentEvaluation(evaluation);
       onAnswerSubmit(answer, evaluation);
       setAnswer('');
@@ -476,38 +692,124 @@ const QATab: React.FC<{
     onContinue?.();
   };
 
+  const handleSelectQuestion = (idx: number) => {
+    setCurrentEvaluation(null);
+    onSelectStopPoint?.(idx);
+    if (stopPoints[idx]) {
+      onSeekToTimestamp?.(stopPoints[idx].timestamp);
+    }
+  };
+
+  // Check if all questions are completed
+  const allCompleted = mode === AppMode.COMPLETED || mode === AppMode.PACK_READY || mode === AppMode.GENERATING_PACK;
+  const answeredCount = answeredQuestionIds.size;
+  const totalQuestions = stopPoints.length;
+
+  // Show completion state
+  if (allCompleted) {
+    return (
+      <div className="space-y-4">
+        {/* Completion Banner */}
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-6 text-center">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-3xl">🎉</span>
+          </div>
+          <h3 className="text-xl font-bold text-emerald-800 mb-2">Session Complete!</h3>
+          <p className="text-emerald-700 text-sm mb-4">
+            You answered {answeredCount} of {totalQuestions} questions.
+          </p>
+          
+          {/* Score summary if we have session history */}
+          {sessionHistory.length > 0 && (
+            <div className="bg-white/60 rounded-lg p-4 mb-4 inline-block">
+              <div className="text-3xl font-bold text-emerald-600">
+                {sessionHistory.reduce((acc, h) => acc + (h.evaluation.score || 0), 0)} / {sessionHistory.length * 5}
+              </div>
+              <div className="text-sm text-emerald-600">Total Score</div>
+            </div>
+          )}
+          
+          <p className="text-sm text-slate-600 italic">
+            Use the Export button to download your session notes and Q&A history.
+          </p>
+        </div>
+
+        {/* Session History */}
+        {sessionHistory.length > 0 && (
+          <div className="bg-slate-50 rounded-lg p-4">
+            <h4 className="font-bold text-slate-700 mb-3">📝 Your Answers</h4>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              {sessionHistory.map((item, idx) => (
+                <div key={idx} className="bg-white rounded-lg p-3 border border-slate-100">
+                  <div className="flex items-start gap-2 mb-2">
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-bold rounded">Q{idx + 1}</span>
+                    <p className="text-sm text-slate-700 flex-1">{item.question}</p>
+                  </div>
+                  <div className="ml-6 space-y-1">
+                    <p className="text-sm text-slate-600"><span className="font-medium">Your answer:</span> {item.answer}</p>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 text-xs font-bold rounded ${
+                        item.evaluation.score >= 4 ? 'bg-green-100 text-green-700' :
+                        item.evaluation.score >= 3 ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {item.evaluation.score}/5
+                      </span>
+                      <span className="text-xs text-slate-500">{item.evaluation.strengthsSummary}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Voice Roleplay option for soft skills */}
+        {showVoiceRoleplayButton && onStartVoiceRoleplay && (
+          <button
+            onClick={onStartVoiceRoleplay}
+            className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2"
+          >
+            🎭 Continue with Voice Roleplay
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Question List */}
       <div className="bg-slate-50 p-3 rounded-lg">
-        <h3 className="text-sm font-bold text-slate-700 mb-2">Questions ({plan.stopPoints.length})</h3>
-        <div className="space-y-1">
-          {plan.stopPoints.map((sp, idx) => (
-            <button
-              key={sp.id}
-              onClick={() => {
-                onSelectStopPoint?.(idx);
-                onSeekToTimestamp?.(sp.timestamp);
-              }}
-              className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-                idx === currentStopIndex
-                  ? 'bg-indigo-100 text-indigo-700 font-medium'
-                  : 'hover:bg-slate-100 text-slate-600'
-              }`}
-            >
-              <span className="font-mono text-xs mr-2">{formatTimestamp(sp.timestamp)}</span>
-              Q{idx + 1}
-            </button>
-          ))}
+        <h3 className="text-sm font-bold text-slate-700 mb-2">Questions ({stopPoints.length})</h3>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {stopPoints.map((sp, idx) => {
+            const isAnswered = answeredQuestionIds.has(sp.id);
+            return (
+              <button
+                key={sp.id}
+                onClick={() => handleSelectQuestion(idx)}
+                className={`w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center gap-2 ${
+                  idx === currentStopIndex
+                    ? 'bg-indigo-100 text-indigo-700 font-medium'
+                    : 'hover:bg-slate-100 text-slate-600'
+                }`}
+              >
+                <span className="font-mono text-xs">{formatTimestamp(sp.timestamp)}</span>
+                <span>Q{idx + 1}</span>
+                {isAnswered && <span className="text-green-500 text-xs">✓</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Current Question */}
       {currentStopPoint && (
         <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded">
-              Question {currentStopIndex + 1} of {plan.stopPoints.length}
+              Question {currentStopIndex + 1} of {stopPoints.length}
             </span>
             <button
               onClick={() => onSeekToTimestamp?.(currentStopPoint.timestamp)}
@@ -515,9 +817,19 @@ const QATab: React.FC<{
             >
               📺 {formatTimestamp(currentStopPoint.timestamp)}
             </button>
+            {answeredQuestionIds.has(currentStopPoint.id) && (
+              <span className="text-xs text-green-600 font-medium">✓ Answered</span>
+            )}
           </div>
           
           <p className="text-slate-800 font-medium mb-3">{currentStopPoint.question}</p>
+          
+          {/* Context if available */}
+          {currentStopPoint.contextSummary && (
+            <div className="bg-blue-50 p-3 rounded-lg text-slate-600 text-sm italic mb-3">
+              {currentStopPoint.contextSummary}
+            </div>
+          )}
           
           {/* Show evaluation loading or feedback */}
           {isEvaluating ? (
@@ -532,7 +844,6 @@ const QATab: React.FC<{
               compact={true}
             />
           ) : (
-            // Show answer form when not evaluating and no feedback
             <>
               <textarea
                 value={answer}
@@ -564,8 +875,18 @@ const QATab: React.FC<{
           )}
         </div>
       )}
+      
+      {/* Voice Roleplay Button */}
+      {showVoiceRoleplayButton && onStartVoiceRoleplay && (
+        <button
+          onClick={onStartVoiceRoleplay}
+          className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2"
+        >
+          🎭 Start Voice Roleplay
+        </button>
+      )}
     </div>
   );
 };
 
-export default TechnicalPanel;
+export default LearningPanel;

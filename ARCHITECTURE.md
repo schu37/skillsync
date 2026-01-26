@@ -1,7 +1,7 @@
 # SkillSync Architecture & Design Document
 
-> **Last Updated**: January 21, 2026  
-> **Version**: 0.2.0  
+> **Last Updated**: January 25, 2026  
+> **Version**: 0.7.0  
 > **Hackathon**: Google Gemini 3 Devpost ($100K Prize Pool)  
 > **Deadline**: Jan 30, 2026
 
@@ -14,6 +14,7 @@
 ### Core Value Proposition
 - **For Soft Skills**: Practice negotiation, communication, leadership through roleplay
 - **For Technical Skills**: Learn DIY/maker projects with parts lists, build instructions, and safety guidance
+- **For General Content**: Explore any video with AI-powered notes and chat
 
 ---
 
@@ -24,8 +25,8 @@
 │                        FRONTEND (React + Vite)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │  App.tsx    │  │ VideoPlayer │  │ Interaction │              │
-│  │  (Router)   │  │ (YouTube)   │  │   Panel     │              │
+│  │  App.tsx    │  │ VideoPlayer │  │ LearningPanel│              │
+│  │  (Router)   │  │ (YouTube)   │  │  (Unified)   │              │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
 │         │                │                │                      │
 │  ┌──────▼────────────────▼────────────────▼──────┐              │
@@ -54,7 +55,7 @@
 
 ---
 
-## 📁 File Structure
+## 📁 File Structure (Refactored v0.7.0)
 
 ```
 Skillsync/
@@ -63,6 +64,7 @@ Skillsync/
 ├── App.tsx                 # Main app component, state management
 ├── types.ts                # TypeScript interfaces
 ├── constants.ts            # App configuration, presets
+├── utils.ts                # Shared utility functions (NEW)
 ├── vite.config.ts          # Vite + env vars
 ├── tsconfig.json           # TypeScript config
 ├── package.json            # Dependencies
@@ -72,10 +74,22 @@ Skillsync/
 │
 ├── components/
 │   ├── VideoPlayer.tsx     # YouTube iframe + timeline markers
-│   ├── InteractionPanel.tsx # Q&A, Notes, Chat tabs (soft skills mode)
 │   ├── ModeSelector.tsx    # Soft/Technical/General mode toggle
-│   ├── TechnicalPanel.tsx  # Overview, Parts, Tools, Steps, Why?, Q&A, Notes, Chat (technical mode)
-│   ├── OthersPanel.tsx     # Notes, Chat for unclassified videos (general mode)
+│   │
+│   │── panels/             # Mode-specific panel content (NEW)
+│   │   ├── LearningPanel.tsx   # Unified panel container (replaces 3 panels)
+│   │   ├── PanelHeader.tsx     # Shared header component
+│   │   ├── PanelTabs.tsx       # Shared tab navigation
+│   │   └── SoftSkillsContent.tsx    # Soft-skills specific tabs (Roleplay intro)
+│   │   └── TechnicalContent.tsx     # Technical-specific tabs (Parts, Tools, Steps, Design)
+│   │   └── GeneralBanner.tsx        # Warning banner for general mode
+│   │
+│   ├── shared/             # Reusable components (NEW)
+│   │   ├── QASection.tsx       # Q&A tab (unified across all modes)
+│   │   ├── FeedbackDisplay.tsx # Score, strengths, improvements display
+│   │   ├── TabButton.tsx       # Single tab button component
+│   │   └── Badge.tsx           # Reusable badge component
+│   │
 │   ├── SafetyBanner.tsx    # Disclaimer for technical projects
 │   ├── NotesSection.tsx    # Note-taking with auto-save
 │   ├── VideoChatSection.tsx # AI chat about video content
@@ -89,6 +103,85 @@ Skillsync/
 └── hooks/
     └── useVoiceInput.ts    # Web Speech API hooks
 ```
+
+---
+
+## 🔄 Component Refactoring (v0.7.0)
+
+### Before: Duplicate Panel Components ❌
+
+The old architecture had **3 separate panel components** with significant code duplication:
+
+```
+InteractionPanel.tsx (790 lines) - Soft Skills mode
+TechnicalPanel.tsx   (623 lines) - Technical mode  
+OthersPanel.tsx      (90 lines)  - General mode
+────────────────────────────────
+Total: ~1500 lines with duplicated:
+  - Tab navigation logic
+  - Q&A evaluation flow
+  - Feedback display UI
+  - Notes/Chat integration
+  - Header styling
+  - Container styling
+```
+
+### After: Unified Panel Architecture ✅
+
+```
+LearningPanel.tsx    (200 lines) - Unified container
+├── PanelHeader.tsx  (50 lines)  - Mode-aware header
+├── PanelTabs.tsx    (80 lines)  - Tab navigation
+├── QASection.tsx    (250 lines) - Shared Q&A logic
+├── FeedbackDisplay.tsx (100 lines) - Evaluation display
+├── TechnicalContent.tsx (300 lines) - Parts, Tools, Steps, Design
+├── SoftSkillsContent.tsx (50 lines) - Roleplay intro only
+└── GeneralBanner.tsx (30 lines) - Warning for general mode
+────────────────────────────────
+Total: ~1060 lines (30% reduction)
+```
+
+### Key Design Principles
+
+1. **Composition over Conditionals**: Instead of mode-based if/else, compose features
+2. **Feature Flags**: Each mode defines which tabs/features are available
+3. **Shared State**: Q&A state, notes, chat managed at LearningPanel level
+4. **Mode Config Object**: Define mode differences declaratively
+
+```typescript
+// Mode configuration (declarative approach)
+const MODE_CONFIG: Record<SkillMode, ModeConfig> = {
+  soft: {
+    tabs: ['qa', 'notes', 'chat'],
+    hasRoleplay: true,
+    headerBadge: { text: plan.scenario, color: 'indigo' },
+    banner: null,
+  },
+  technical: {
+    tabs: ['overview', 'parts', 'tools', 'steps', 'design', 'qa', 'notes', 'chat'],
+    hasRoleplay: false,
+    headerBadge: { text: plan.projectType, color: 'emerald' },
+    banner: <SafetyBanner />,
+  },
+  others: {
+    tabs: ['notes', 'chat'],
+    hasRoleplay: false,
+    headerBadge: { text: 'General Content', color: 'slate' },
+    banner: <GeneralBanner />,
+  },
+};
+```
+
+### Shared Components
+
+| Component | Purpose | Used By |
+|-----------|---------|---------|
+| `QASection` | Question display, answer input, navigation | Soft, Technical |
+| `FeedbackDisplay` | Score visualization, strengths/improvements | Soft, Technical |
+| `NotesSection` | Note-taking with AI toggle | All modes |
+| `VideoChatSection` | AI chat (discuss/roleplay) | All modes |
+| `PanelTabs` | Tab navigation with icons, counts | All modes |
+| `PanelHeader` | Summary, badges, difficulty | All modes |
 
 ---
 
@@ -119,8 +212,7 @@ Skillsync/
 | **Tab State Persistence** | ✅ Done | P1 | Switching tabs preserves content |
 | **Technical Mode Parity** | ✅ Done | P1 | Q&A, Notes, Chat in technical mode |
 | **Safety Banner Persistence** | ✅ Done | P1 | No auto-play for technical projects |
-| **Mode Switching** | ✅ Done | P1 | Change soft/technical after video load |
-| **Unified Notes** | ✅ Done | P1 | Single notes area with AI toggle |
+| **Chat Export** | ✅ Done | P1 | Export chat to .md and Google Docs |
 | Study Pack Generation | ✅ Done | P2 | Markdown summary |
 | Safety Disclaimer | ✅ Done | P2 | User acknowledgment |
 | Google Sheets Export | 🔨 Partial | P2 | Parts list export |
@@ -258,6 +350,36 @@ window.open(documentUrl, '_blank');
 ```typescript
 const { spreadsheetUrl } = await exportPartsToGoogleSheets(technicalPlan, accessToken);
 ```
+
+### 4. Unified Export Modal (v0.8.0)
+
+The `ExportModal` component provides a unified export experience across all learning modes:
+
+```
+┌─────────────────────────────────────────────────┐
+│  📥 Export Session                              │
+├─────────────────────────────────────────────────┤
+│  [Select All] [Clear All]                       │
+│                                                 │
+│  ☑ 📋 Summary - Video summary and skills       │
+│  ☑ 📝 Personal Notes - Your session notes      │
+│  ☐ 📦 Parts List - 12 components (technical)   │
+│  ☐ 🛠️ Tools - 8 tools required (technical)     │
+│  ☐ 📐 Build Steps - 15 instructions (technical)│
+│  ☐ ❓ Q&A Questions - 5 practice questions     │
+│  ☐ ✍️ Your Answers - 3 answered with scores    │
+│  ☐ 💬 Chat History - 10 messages               │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│  [Download .md]  [Google Docs]  [Parts→Sheets] │
+└─────────────────────────────────────────────────┘
+```
+
+**Features:**
+- Mode-aware section visibility (technical-only sections hidden for soft skills)
+- Selectable content sections for customized exports
+- Multiple export formats: Markdown, Google Docs, Google Sheets (parts only)
+- Accessible via navbar Export button when lesson plan exists
 
 ---
 
@@ -489,26 +611,147 @@ VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better v
 ### Bugs
 - [ ] YouTube Shorts may have playback issues in some browsers
 - [ ] Long videos (>30min) may timeout on analysis
-- [x] ~~Implement voice roleplay with prosody analysis~~
-- [x] ~~Add typing chat about the video with gemini~~
-- [x] ~~Make tabs sticky and always visible~~
-- [x] ~~Allow mode switching after video load~~
-- [x] ~~Unify notes section with AI toggle~~
-- [x] ~~Fix tab state reset when switching between tabs~~
-- [x] ~~Add Q&A, Notes, Chat to Technical Mode~~
-- [x] ~~Fix Safety Banner persistence and auto-play~~
-- [x] ~~Fix Start Over to reset skill mode properly~~
-- [ ] Add progress persistence (resume sessions)
-- [ ] Mobile responsive improvements
-- [ ] Create nodes and trees or flow charts about how each knowledge points are interconnected
-- [ ] Add progress persistence (resume sessions)
 - [ ] Mobile responsive improvements
 
 ### TODOs
-- [ ] Create nodes and trees or flow charts about how each knowledge points are interconnected. 
+- [x] ~~Create nodes and trees or flow charts about how each knowledge points are interconnected~~ (v0.7.0 - KnowledgeGraph)
+- [x] ~~Add progress persistence (resume sessions)~~ (v0.7.0 - progressStorage)
+- [x] ~~Integrate unified LearningPanel into App.tsx~~ (v0.7.0 - replaced 3 panels with 1) 
 ---
 
 ## 📝 Changelog
+
+### v0.8.0 (2026-01-26) - Unified Export & Completion Fixes
+- **ExportModal Component** (`components/ExportModal.tsx`):
+  - Unified export modal for all learning modes
+  - Selectable content sections: Summary, Notes, Parts, Tools, Steps, Design, Q&A, Session History, Chat
+  - Mode-aware sections (technical sections hidden for soft skills mode)
+  - Export formats: Download Markdown, Google Docs, Google Sheets (parts list)
+  - Accessible via navbar "📥 Export" button when lesson plan exists
+- **Completion Flow Fixes**:
+  - Technical and Others modes now go directly to `COMPLETED` state after Q&A
+  - Study Pack generation only for Soft Skills mode
+  - Added `COMPLETED`, `PACK_READY`, `GENERATING_PACK` to LearningPanel conditions
+  - QATab shows completion banner with session summary when all questions answered
+- **OthersLessonPlan Type** (`types.ts`):
+  - Added new `OthersLessonPlan` interface for 'others' mode
+  - Added `isOthersPlan()` type guard
+  - Fixed type error when assigning 'others' mode
+
+### v0.7.1 (2026-01-25) - Auto-Detection & Mode Override Flow
+- **Auto-Detect Video Category** (`services/geminiService.ts`):
+  - New `detectVideoMode()` exported function for lightweight category detection
+  - Returns `{ mode, confidence, reasoning }` for soft/technical/others
+  - Runs before full lesson plan generation
+  - Uses Gemini 3 flash model for fast detection
+- **New App States** (`types.ts`):
+  - Added `DETECTING_MODE`: Shows spinner while detecting category
+  - Added `MODE_DETECTED`: Shows detected mode with confirmation UI
+- **Mode Detection Flow** (`App.tsx`):
+  - User submits URL → Auto-detect runs → Shows detected mode
+  - User can override detected mode before proceeding
+  - "Auto-detected" badge with confidence % or "User override" badge
+  - Shows reasoning from AI (e.g., "Detected hands-on technical tutorial")
+- **Smart Cache Handling**:
+  - Checks all three mode caches on URL submit
+  - If cached plan exists, skips detection and uses cached mode
+  - Shows cache indicator when cached plan available for selected mode
+  - "Force re-analyze" option to bypass cache
+  - Button changes: "Load Cached Lesson →" vs "Analyze & Start →"
+- **User Override Support**:
+  - User can switch mode after auto-detection
+  - System tracks `isUserOverride` state
+  - Shows cache status when switching to modes with/without cache
+
+### v0.7.0 (2026-01-25) - Unified Panel & Progress Persistence
+- **Unified LearningPanel Component** (`components/LearningPanel.tsx`):
+  - Consolidates TechnicalPanel, InteractionPanel, and OthersPanel patterns
+  - Single component handles all three learning modes (technical, soft, others)
+  - Shared tab navigation with mode-specific content
+  - Reduces code duplication across panels
+  - Common header with dynamic badges based on mode
+  - Shared Notes and Chat tabs for all modes
+  - Mode-aware tab configuration (shows relevant tabs per mode)
+  - **Now integrated into App.tsx** - replaces old panel switching logic
+  - Uses `lessonPlan.mode` as source of truth (not the user-selected `skillMode`)
+- **Knowledge Graph Visualization** (`components/KnowledgeGraph.tsx`):
+  - New Graph tab shows concept interconnections from lesson plan
+  - Extracts skills, components, tools, steps, and questions as nodes
+  - Shows relationships between concepts as edges
+  - Grid view for browsing by category, List view for linear exploration
+  - Click nodes to see details and connections
+  - Jump to video timestamp for timestamped concepts
+  - Visual legend with color-coded concept types
+- **Progress Persistence** (`services/storageService.ts` - `progressStorage`):
+  - Auto-saves learning session state to localStorage
+  - Saves: video URL, lesson plan, current question, answered questions, session history
+  - Resume prompt on app load when saved progress exists
+  - Shows summary: mode, questions answered, save timestamp
+  - "Resume" to continue session, "Start Fresh" to clear and start new
+  - 7-day TTL on saved progress
+  - Progress cleared on explicit "Start Over"
+  - Updates saved progress on every state change
+
+### v0.6.5 (2026-01-25) - UI Polish
+- **ModeSelector Cleanup**:
+  - Removed outdated "(auto-detected from video)" label since auto-detection was disabled
+  - Changed "Auto-detect from video" dropdown option to contextual "Select a scenario/project type..." placeholder
+- **TechnicalPanel Tab Improvements**:
+  - Fixed tab text truncation issue where labels were hidden on smaller screens
+  - Tab labels now always visible with improved padding and styling
+  - Active tab now has subtle white background highlight
+  - Hover states improved for better accessibility
+  - Badge count only shows when count > 0
+  - Added title attribute for tooltip on hover
+
+### v0.6.4 (2026-01-25) - Mode Switching & Chat Export
+- **Mode Switching Improvements**: Complete redesign of mode change flow
+  - Removed auto-detection system that caused API overload (503 errors)
+  - User-selected mode is now always respected (no more auto-override)
+  - Added confirmation modal when switching modes mid-session
+  - Modal warns about progress loss and prompts to save before switching
+  - App resets to IDLE after mode change to let user re-enter video
+  - Prevents multiple API calls and ensures clean state
+  - "Start Over" button now disabled during video loading and regeneration
+- **Chat Export Feature**: Export chat conversations to Markdown and Google Docs
+  - Export button appears in chat header when messages exist
+  - **Download .md**: Instant download with formatted chat history
+  - **Export to Google Docs**: Opens in new tab with OAuth (same flow as lesson exports)
+  - Both formats include mode label (💬 Discussion or 🎭 Roleplay)
+  - Includes message count, timestamps, and role labels (👤 You / 🤖 AI)
+  - Clean formatting with dividers between messages
+  - Integrated with existing Google OAuth infrastructure
+- **Cache Improvements**: Fixed cache to respect user-selected mode
+  - Cache key now based on user selection, not auto-detected mode
+  - Switching modes properly generates new content instead of returning cached wrong mode
+  - Each mode (soft/technical/general) has separate cache entry per video
+
+### v0.7.0 (2026-01-25) - Architecture Refactoring
+- **Unified LearningPanel**: Replaced 3 separate panel components with single unified component
+  - `InteractionPanel.tsx` (790 lines) + `TechnicalPanel.tsx` (623 lines) + `OthersPanel.tsx` (90 lines) → `LearningPanel.tsx` + shared components
+  - ~30% code reduction through elimination of duplicated logic
+  - Mode differences now handled via configuration object, not conditionals
+- **Shared Component Extraction**: Created reusable components
+  - `QASection.tsx` - Unified Q&A logic used by Soft Skills and Technical modes
+  - `FeedbackDisplay.tsx` - Score visualization, strengths/improvements (extracted from both panels)
+  - `PanelHeader.tsx` - Mode-aware header with badges and summary
+  - `PanelTabs.tsx` - Tab navigation with icons, counts, active state
+  - `TabButton.tsx` - Single tab button component
+  - `Badge.tsx` - Reusable badge for labels/tags
+- **Utility Functions**: Created `utils.ts` for shared helpers
+  - `formatTimestamp(seconds)` - MM:SS formatting (was duplicated 4 times)
+  - `copyToClipboard(text)` - Clipboard with success callback
+  - `renderMarkdown(text)` - Markdown to HTML conversion
+- **Configuration-Driven Modes**: Declarative mode definitions
+  - Each mode defines tabs, features, badges via config object
+  - Easy to add new modes without duplicating panel code
+  - Banner components passed as config, not hardcoded
+- **Technical Mode Fixes**: Q&A feedback now properly displays in Technical mode
+  - Evaluation results (score, strengths, improvements) visible after submission
+  - Fixed mode prop propagation to QASection
+- **Mode Auto-Regeneration**: Switching modes now auto-regenerates lesson plan
+  - useEffect watches `skillMode` and `selectedPreset` changes
+  - No need to manually click "New Questions" after mode switch
 
 ### v0.6.3 (2026-01-25)
 - **General Content Mode ("Others")**: Added third learning mode for videos without clear educational classification

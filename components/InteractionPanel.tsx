@@ -3,6 +3,8 @@ import { AppMode, LessonPlan, StopPoint, Evaluation, StudyPack } from '../types'
 import { evaluateAnswer } from '../services/geminiService';
 import { downloadAsMarkdown } from '../services/exportService';
 import { QUESTION_TYPES } from '../constants';
+import { formatTimestamp } from '../utils';
+import { FeedbackDisplay, LoadingSpinner } from './shared';
 import NotesSection from './NotesSection';
 import VideoChatSection from './VideoChatSection';
 
@@ -27,6 +29,8 @@ interface InteractionPanelProps {
   onStartVoiceRoleplay?: () => void;
   // NEW: Selected scenario from dropdown
   selectedScenario?: string;
+  googleAccessToken?: string | null;
+  onRequestGoogleAuth?: () => void;
 }
 
 // Helper to get question type info
@@ -59,6 +63,8 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
   showVoiceRoleplayButton = false,
   onStartVoiceRoleplay,
   selectedScenario,
+  googleAccessToken,
+  onRequestGoogleAuth,
 }) => {
   const [answer, setAnswer] = useState("");
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -155,7 +161,7 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
               </svg>
             </div>
             <p className="text-lg font-medium">Ready to start</p>
-            <p className="text-sm mt-2">Enter a YouTube URL above to begin.</p>
+            <p className="text-sm mt-2">Enter a YouTube video URL above to begin. <span className="text-slate-400">(Only YouTube is supported)</span></p>
           </>
         )}
       </div>
@@ -175,7 +181,13 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
         
         {/* Chat Tab - hidden when not active */}
         <div className={activeTab === 'chat' ? 'flex flex-col h-full' : 'hidden'}>
-          <VideoChatSection lessonPlan={lessonPlan} selectedScenario={selectedScenario} onStartVoiceRoleplay={onStartVoiceRoleplay} />
+          <VideoChatSection 
+            lessonPlan={lessonPlan} 
+            selectedScenario={selectedScenario} 
+            onStartVoiceRoleplay={onStartVoiceRoleplay}
+            googleAccessToken={googleAccessToken}
+            onRequestGoogleAuth={onRequestGoogleAuth}
+          />
         </div>
         
         {/* Q&A Tab - hidden when not active */}
@@ -315,78 +327,19 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
           <div className="flex-1 p-6 overflow-y-auto">
             {/* Show loading during evaluation */}
             {isEvaluating && (
-              <div className="flex flex-col items-center justify-center h-full">
-                <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-lg font-medium text-slate-700">Evaluating your answer...</p>
-                <p className="text-sm text-slate-500">Gemini is analyzing your response</p>
-              </div>
+              <LoadingSpinner 
+                message="Evaluating your answer..."
+                subMessage="Gemini is analyzing your response"
+                size="lg"
+              />
             )}
             
             {/* Show feedback after evaluation */}
             {!isEvaluating && mode === AppMode.FEEDBACK && currentEvaluation ? (
-              <div className="space-y-6 animate-fadeIn">
-                {/* Score */}
-                <div className="flex items-center gap-4">
-                   <div className={`text-4xl font-bold ${currentEvaluation.score >= 4 ? 'text-green-500' : currentEvaluation.score >= 3 ? 'text-amber-500' : 'text-red-500'}`}>
-                     {currentEvaluation.score}/5
-                   </div>
-                   <div className="flex-1">
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full ${currentEvaluation.score >= 4 ? 'bg-green-500' : currentEvaluation.score >= 3 ? 'bg-amber-500' : 'bg-red-500'}`} 
-                          style={{ width: `${(currentEvaluation.score / 5) * 100}%` }} 
-                        />
-                      </div>
-                   </div>
-                </div>
-
-                {/* Feedback */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 bg-green-50 rounded-lg border border-green-100">
-                    <h3 className="text-sm font-bold text-green-800 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                      Strengths
-                    </h3>
-                    <ul className="text-sm text-green-700 list-disc list-inside space-y-1">
-                      {currentEvaluation.strengths.map((s, i) => <li key={i}>{s}</li>)}
-                    </ul>
-                  </div>
-                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-100">
-                    <h3 className="text-sm font-bold text-amber-800 mb-2 flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                      Improvements
-                    </h3>
-                    <ul className="text-sm text-amber-700 list-disc list-inside space-y-1">
-                      {currentEvaluation.improvements.map((s, i) => <li key={i}>{s}</li>)}
-                    </ul>
-                  </div>
-                </div>
-
-                {/* Better Answer */}
-                <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                   <h3 className="text-sm font-bold text-indigo-900 mb-2">Better Answer</h3>
-                   <p className="text-sm text-indigo-800 italic">"{currentEvaluation.rewrittenAnswer}"</p>
-                </div>
-                
-                {/* Evidence */}
-                {currentEvaluation.evidence.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-700 mb-2">Supporting Evidence</h3>
-                    <div className="space-y-2">
-                      {currentEvaluation.evidence.map((ev, i) => (
-                        <div key={i} className="text-xs bg-slate-50 p-2 rounded border-l-2 border-slate-300 text-slate-600">
-                          {ev.timestamp != null && (
-                            <span className="font-mono font-bold mr-2 text-slate-400">
-                              {new Date(ev.timestamp * 1000).toISOString().slice(14, 19)}
-                            </span>
-                          )}
-                          "{ev.text}"
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <FeedbackDisplay 
+                evaluation={currentEvaluation}
+                showContinueButton={false}
+              />
             ) : !isEvaluating ? (
               /* Input Form */
               <div className="space-y-4">

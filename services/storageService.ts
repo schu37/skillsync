@@ -5,7 +5,7 @@
  * Can be swapped to Supabase by implementing SupabaseStorageService.
  */
 
-import { LessonPlan, SavedLessonPlan, UserSession, SkillMode, VideoSession, AnsweredQuestion, Evaluation } from '../types';
+import { LessonPlan, SavedLessonPlan, UserSession, SkillMode, VideoSession, AnsweredQuestion, Evaluation, TechnicalLessonPlan, SoftSkillsLessonPlan } from '../types';
 
 // ============================================
 // STORAGE INTERFACE
@@ -41,7 +41,7 @@ export interface StoredUser {
 }
 
 export interface AppSettings {
-  preferredMode: 'soft' | 'technical';
+  preferredMode: SkillMode;
   autoPlay: boolean;
   showSafetyBanners: boolean;
   voiceEnabled: boolean;
@@ -72,7 +72,7 @@ const STORAGE_KEYS = {
 
 interface CachedVideo {
   url: string;
-  mode: 'soft' | 'technical';
+  mode: SkillMode;
   plan: LessonPlan;
   cachedAt: string;
   expiresAt: string;
@@ -87,7 +87,7 @@ const getCacheKey = (url: string, mode: string): string => {
 };
 
 export const videoCache = {
-  get(url: string, mode: 'soft' | 'technical'): LessonPlan | null {
+  get(url: string, mode: SkillMode): LessonPlan | null {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.VIDEO_CACHE);
       if (!data) return null;
@@ -113,7 +113,7 @@ export const videoCache = {
     }
   },
 
-  set(url: string, mode: 'soft' | 'technical', plan: LessonPlan): void {
+  set(url: string, mode: SkillMode, plan: LessonPlan): void {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.VIDEO_CACHE);
       const cache: Record<string, CachedVideo> = data ? JSON.parse(data) : {};
@@ -153,7 +153,7 @@ export const videoCache = {
     console.log('🗑️ Video cache cleared');
   },
 
-  clearUrl(url: string, mode: 'soft' | 'technical'): void {
+  clearUrl(url: string, mode: SkillMode): void {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.VIDEO_CACHE);
       if (!data) return;
@@ -614,5 +614,131 @@ export const videoContextCache = {
         rolePlayPersona: softPlan.rolePlayPersona,
       };
     }
+  },
+};
+
+// ============================================
+// PROGRESS PERSISTENCE (Resume Sessions)
+// ============================================
+
+export interface SavedProgress {
+  videoUrl: string;
+  videoId: string;
+  skillMode: SkillMode;
+  selectedPreset: string;
+  lessonPlan: LessonPlan;
+  currentStopIndex: number;
+  sessionHistory: { question: string; answer: string; evaluation: Evaluation }[];
+  answeredQuestionIds: string[];
+  savedAt: string;
+}
+
+const PROGRESS_KEY = 'skillsync_saved_progress';
+const PROGRESS_TTL_DAYS = 7; // Keep progress for 7 days
+
+export const progressStorage = {
+  /**
+   * Save current learning progress
+   */
+  save(progress: Omit<SavedProgress, 'savedAt'>): void {
+    try {
+      const saved: SavedProgress = {
+        ...progress,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify(saved));
+      console.log('💾 Progress saved');
+    } catch (e) {
+      console.warn('Failed to save progress:', e);
+    }
+  },
+
+  /**
+   * Get saved progress if it exists and is not expired
+   */
+  get(): SavedProgress | null {
+    try {
+      const stored = localStorage.getItem(PROGRESS_KEY);
+      if (!stored) return null;
+
+      const progress: SavedProgress = JSON.parse(stored);
+
+      // Check TTL
+      const savedDate = new Date(progress.savedAt);
+      const now = new Date();
+      const daysDiff = (now.getTime() - savedDate.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysDiff > PROGRESS_TTL_DAYS) {
+        this.clear();
+        return null;
+      }
+
+      return progress;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Check if there's resumable progress
+   */
+  hasResumableProgress(): boolean {
+    return this.get() !== null;
+  },
+
+  /**
+   * Get a summary of saved progress for display
+   */
+  getSummary(): { videoUrl: string; mode: SkillMode; questionsAnswered: number; savedAt: string } | null {
+    const progress = this.get();
+    if (!progress) return null;
+
+    return {
+      videoUrl: progress.videoUrl,
+      mode: progress.skillMode,
+      questionsAnswered: progress.answeredQuestionIds.length,
+      savedAt: progress.savedAt,
+    };
+  },
+
+  /**
+   * Clear saved progress
+   */
+  clear(): void {
+    localStorage.removeItem(PROGRESS_KEY);
+    console.log('🗑️ Progress cleared');
+  },
+
+  /**
+   * Update just the stop index (for quick saves during navigation)
+   */
+  updateStopIndex(index: number): void {
+    const progress = this.get();
+    if (!progress) return;
+
+    progress.currentStopIndex = index;
+    progress.savedAt = new Date().toISOString();
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  },
+
+  /**
+   * Add a new answer to the saved progress
+   */
+  addAnswer(questionId: string, question: string, answer: string, evaluation: Evaluation): void {
+    const progress = this.get();
+    if (!progress) return;
+
+    // Add to history if not already there
+    if (!progress.sessionHistory.some(h => h.question === question)) {
+      progress.sessionHistory.push({ question, answer, evaluation });
+    }
+
+    // Add to answered IDs
+    if (!progress.answeredQuestionIds.includes(questionId)) {
+      progress.answeredQuestionIds.push(questionId);
+    }
+
+    progress.savedAt = new Date().toISOString();
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
   },
 };

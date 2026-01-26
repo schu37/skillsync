@@ -149,14 +149,20 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
         <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-indigo-500 to-purple-500">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-lg font-bold text-white">Voice Roleplay Practice</h2>
-                <p className="text-sm text-white/80 line-clamp-2 leading-tight">{config.persona}</p>
+                <details className="group">
+                  <summary className="text-sm text-white/80 cursor-pointer hover:text-white transition-colors">
+                    <span className="line-clamp-1 inline">{config.persona.slice(0, 80)}{config.persona.length > 80 ? '...' : ''}</span>
+                    <span className="text-xs ml-1 text-white/60 group-open:hidden">(click to expand)</span>
+                  </summary>
+                  <p className="text-sm text-white/90 mt-1 leading-relaxed">{config.persona}</p>
+                </details>
               </div>
             </div>
             <button
