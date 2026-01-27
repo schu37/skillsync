@@ -401,11 +401,11 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
               {/* Recording Button */}
               <button
                 onClick={isRecording ? stopRecording : startRecording}
-                disabled={isSpeaking || connectionState === 'processing' || conversationRounds >= maxConversationRounds}
+                disabled={isSpeaking || connectionState === 'processing' || connectionState === 'speaking' || conversationRounds >= maxConversationRounds}
                 className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
                   isRecording
                     ? 'bg-red-500 hover:bg-red-600 text-white scale-105'
-                    : isSpeaking || connectionState === 'processing' || conversationRounds >= maxConversationRounds
+                    : isSpeaking || connectionState === 'processing' || connectionState === 'speaking' || conversationRounds >= maxConversationRounds
                     ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                     : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                 }`}
@@ -415,7 +415,7 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
                 </svg>
                 {conversationRounds >= maxConversationRounds ? 'Session Complete' :
                  isRecording ? 'Stop Recording' : 
-                 isSpeaking ? 'AI Speaking...' :
+                 isSpeaking || connectionState === 'speaking' ? 'AI Speaking...' :
                  connectionState === 'processing' ? 'Processing...' :
                  'Start Recording'}
               </button>
@@ -452,11 +452,11 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Type your response..."
                     className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                    disabled={isSpeaking || connectionState === 'processing'}
+                    disabled={isSpeaking || connectionState === 'processing' || connectionState === 'speaking'}
                   />
                   <button
                     type="submit"
-                    disabled={!textInput.trim() || isSpeaking || connectionState === 'processing'}
+                    disabled={!textInput.trim() || isSpeaking || connectionState === 'processing' || connectionState === 'speaking'}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl transition-colors"
                   >
                     Send
