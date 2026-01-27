@@ -1574,6 +1574,10 @@ const selectVoiceForEmotion = (emotion: string): string => {
  * Select a consistent voice for an entire roleplay session based on persona description.
  * This is called ONCE at session start and the same voice is used for all rounds.
  * Exported so it can be used by the voice roleplay hook.
+ * 
+ * Voice genders from Gemini TTS API:
+ * MALE: Achird, Algenib, Algieba, Alnilam, Charon, Orus, Puck, Fenrir, Iapetus, Enceladus, Umbriel, Gacrux, Sadaltager
+ * FEMALE: Achernar, Aoede, Autonoe, Callirrhoe, Kore, Leda, Zephyr, Erinome, Despina, Laomedeia, Schedar, Pulcherrima, Sulafat, Vindemiatrix, Rasalgethi, Sadachbia
  */
 export const selectVoiceForPersona = (persona: string): string => {
   const personaLower = persona.toLowerCase();
@@ -1612,6 +1616,9 @@ export const selectVoiceForPersona = (persona: string): string => {
                          personaLower.includes('executive') || 
                          personaLower.includes('manager') ||
                          personaLower.includes('interviewer') ||
+                         personaLower.includes('ceo') ||
+                         personaLower.includes('officer') ||
+                         personaLower.includes('director') ||
                          personaLower.includes('formal');
   
   const isSkeptical = personaLower.includes('skeptic') || 
@@ -1620,31 +1627,36 @@ export const selectVoiceForPersona = (persona: string): string => {
                       personaLower.includes('questioning');
   
   // Select voice based on personality + gender combination
+  // Using CORRECT genders from Gemini TTS API
   if (isAggressive) {
-    return isFemale ? 'Kore' : 'Orus'; // Firm voices
+    // Firm voices for aggressive characters
+    return isFemale ? 'Kore' : 'Alnilam'; // Kore=Firm(F), Alnilam=Firm(M)
   }
   
   if (isSkeptical) {
-    return isFemale ? 'Charon' : 'Puck'; // Informative/upbeat but can sound skeptical
+    // Informative/questioning voices
+    return isFemale ? 'Erinome' : 'Charon'; // Erinome=Clear(F), Charon=Informative(M)
   }
   
   if (isProfessional) {
-    return isFemale ? 'Kore' : 'Orus'; // Firm professional voices
+    // Professional/formal voices
+    return isFemale ? 'Kore' : 'Orus'; // Kore=Firm(F), Orus=Firm(M)
   }
   
   if (isFriendly) {
-    return isFemale ? 'Achird' : 'Fenrir'; // Friendly/excitable voices
+    // Friendly/warm voices
+    return isFemale ? 'Aoede' : 'Achird'; // Aoede=Breezy(F), Achird=Friendly(M)
   }
   
   // Default voices based on gender
   if (isFemale) {
-    return 'Sulafat'; // Warm voice
+    return 'Sulafat'; // Warm female voice
   }
   if (isMale) {
-    return 'Charon'; // Informative voice
+    return 'Charon'; // Informative male voice
   }
   
-  // Ultimate default - versatile voice
+  // Ultimate default - female professional voice (neutral for unknown gender)
   return 'Kore';
 };
 

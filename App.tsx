@@ -7,7 +7,6 @@ import { exportToGoogleDocs } from './services/exportService';
 import { DEMO_VIDEO_ID, APP_TITLE, APP_DESCRIPTION, SOFT_SKILL_PRESETS, TECHNICAL_PROJECT_TYPES } from './constants';
 import { extractVideoId } from './utils';
 import VideoPlayer from './components/VideoPlayer';
-import InteractionPanel from './components/InteractionPanel';
 import ModeSelector from './components/ModeSelector';
 import LearningPanel from './components/LearningPanel';
 import DisclaimerModal, { hasAcceptedTerms } from './components/DisclaimerModal';
@@ -1045,29 +1044,31 @@ const App: React.FC = () => {
                    isRegenerating={isRegenerating}
                  />
              ) : (
-               // Fallback for IDLE/LOADING states - show InteractionPanel for loading UI
-               <InteractionPanel 
-                  mode={mode}
-                  lessonPlan={lessonPlan}
-                  currentStopPoint={currentStopPoint}
-                  currentStopIndex={currentStopIndex}
-                  onAnswerSubmit={handleAnswerSubmit}
-                  onContinue={handleContinue}
-                  onSelectStopPoint={handleSelectStopPoint}
-                  onExportToGoogleDocs={() => handleGoogleDocsExport()}
-                  onRegenerateQuestions={handleRegenerateQuestions}
-                  onSeekToTimestamp={handleSeekToTimestamp}
-                  studyPack={studyPack}
-                  sessionHistory={sessionHistory}
-                  answeredQuestionIds={answeredQuestionIds}
-                  skipAnswered={skipAnswered}
-                  onToggleSkipAnswered={() => setSkipAnswered(!skipAnswered)}
-                  showVoiceRoleplayButton={false}
-                  onStartVoiceRoleplay={() => setShowVoiceRoleplay(true)}
-                  selectedScenario={selectedPreset}
-                  googleAccessToken={googleAccessToken}
-                  onRequestGoogleAuth={googleLogin}
-               />
+               // Loading state - shown while analyzing video
+               <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                 <div className="flex-1 flex items-center justify-center p-8">
+                   <div className="text-center space-y-4">
+                     <div className="w-16 h-16 mx-auto border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                     <div>
+                       <h3 className="text-lg font-semibold text-slate-800">Analyzing Video...</h3>
+                       <p className="text-sm text-slate-500 mt-1">
+                         Gemini AI is watching the video and creating your personalized learning experience
+                       </p>
+                     </div>
+                     <div className="flex flex-wrap justify-center gap-2 mt-4">
+                       <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-full">
+                         📺 Analyzing content
+                       </span>
+                       <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">
+                         ❓ Generating questions
+                       </span>
+                       <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs rounded-full">
+                         📝 Creating study plan
+                       </span>
+                     </div>
+                   </div>
+                 </div>
+               </div>
              )}
               </ErrorBoundary>
             </div>

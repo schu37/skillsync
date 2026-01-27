@@ -28,6 +28,8 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
   const [error, setError] = useState<string | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const [conversationRounds, setConversationRounds] = useState(0);
+  const [sessionFeedback, setSessionFeedback] = useState<string | null>(null);
+  const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -113,16 +115,25 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
       const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
       const ai = new GoogleGenAI({ apiKey });
       
-      // Generate an in-character opening line
+      // Generate an in-character opening line that asks user what they want to practice
       const prompt = `You are playing this character in a roleplay scenario:
       
 Character: ${config?.persona || 'A professional colleague'}
 Scenario: ${config?.scenario || 'Professional conversation'}
-Context: ${config?.videoContext?.slice(0, 200) || 'General practice'}
+Context from video: ${config?.videoContext?.slice(0, 200) || 'General practice'}
 
-Generate a SHORT (1-2 sentences) opening line that this character would say to start the conversation. 
-Stay completely in character. Don't break the fourth wall.
-Make it natural and appropriate for the scenario.
+Generate a SHORT (1-2 sentences) opening line where you:
+1. Briefly introduce yourself in character (your role/title)
+2. Ask what the user wants to discuss - phrase it naturally as this character would ask
+
+IMPORTANT: Do NOT explicitly mention "skills", "practice", "session", "scenario", or "learning". 
+Stay completely in character as if this is a real conversation.
+Make it natural and inviting.
+
+Examples of good openings:
+- "Hi, I'm [role]. What brings you to my office today?"
+- "[Name here], [role]. What did you want to talk about?"
+- "So, you wanted to meet? What's on your mind?"
 
 Return ONLY the opening line, nothing else.`;
 
@@ -266,7 +277,7 @@ Return ONLY the opening line, nothing else.`;
             messages
           );
           
-          // Add user message
+          // Add user message and increment round counter (user sent a message = 1 round)
           setMessages(prev => [...prev, {
             role: 'user',
             content: result.userTranscript || '(Audio message)',
@@ -274,6 +285,9 @@ Return ONLY the opening line, nothing else.`;
             prosodyAnalysis: result.prosodyAnalysis,
             timestamp: new Date()
           }]);
+          
+          // Increment conversation rounds when user sends a message
+          setConversationRounds(prev => prev + 1);
           
           // Generate TTS audio BEFORE showing assistant message
           // This prevents the 5s delay between message appearing and voice playing
@@ -293,16 +307,6 @@ Return ONLY the opening line, nothing else.`;
             await playAudioBlob(audioBlob2);
           }
           setConnectionState('ready');
-          
-          // Increment conversation rounds
-          setConversationRounds(prev => prev + 1);
-          
-          // Show warning when approaching limit
-          if (conversationRounds + 1 >= MAX_CONVERSATION_ROUNDS - 1) {
-            setTimeout(() => {
-              setError(`Approaching conversation limit (${conversationRounds + 1}/${MAX_CONVERSATION_ROUNDS}). Consider wrapping up.`);
-            }, 2000);
-          }
           
         } catch (e) {
           console.error('Processing error:', e);
@@ -325,13 +329,25 @@ Return ONLY the opening line, nothing else.`;
     emotion: string
   ): Promise<Blob | null> => {
     try {
-      const { geminiTTS } = await import('../services/geminiService');
+      const { geminiTTS, selectVoiceForPersona } = await import('../services/geminiService');
       
-      console.log(`🎭 Pre-generating Gemini TTS with emotion: ${emotion}, voice: ${sessionVoice.current}`);
+      // Ensure session voice is set (should be set by generateOpeningLine, but fallback just in case)
+      if (!sessionVoice.current && config?.persona) {
+        sessionVoice.current = selectVoiceForPersona(config.persona);
+        console.log(`🎭 Session voice initialized in generateTTSAudio: ${sessionVoice.current}`);
+      }
+      
+      // CRITICAL: Use the session voice, never fall back to emotion-based voice
+      const voiceToUse = sessionVoice.current;
+      if (!voiceToUse) {
+        console.error('🔊 No session voice set! This should not happen.');
+      }
+      
+      console.log(`🎭 Pre-generating Gemini TTS with emotion: ${emotion}, voice: ${voiceToUse}`);
       
       const audioBlob = await geminiTTS({
         text: text,
-        voiceName: sessionVoice.current || undefined, // Use fixed session voice
+        voiceName: voiceToUse!, // Use fixed session voice - MUST be set
         emotion: emotion,
         persona: config?.persona,
         style: getStyleForEmotion(emotion),
@@ -378,15 +394,22 @@ Return ONLY the opening line, nothing else.`;
   ): Promise<void> => {
     try {
       // Import the Gemini TTS function
-      const { geminiTTS } = await import('../services/geminiService');
+      const { geminiTTS, selectVoiceForPersona } = await import('../services/geminiService');
+      
+      // Ensure session voice is set
+      if (!sessionVoice.current && config?.persona) {
+        sessionVoice.current = selectVoiceForPersona(config.persona);
+        console.log(`🎭 Session voice initialized in textToSpeechWithEmotion: ${sessionVoice.current}`);
+      }
       
       console.log(`🎭 Using Gemini TTS with emotion: ${emotion}, voice: ${sessionVoice.current}`);
       console.log(`🎭 Persona: ${config?.persona?.slice(0, 50)}...`);
       
       // Generate audio using Gemini TTS with emotion and persona context
+      // CRITICAL: Always use the session voice, never fall back
       const audioBlob = await geminiTTS({
         text: text,
-        voiceName: sessionVoice.current || undefined, // Use fixed session voice
+        voiceName: sessionVoice.current!, // Use fixed session voice - MUST be set
         emotion: emotion,
         persona: config?.persona,
         style: getStyleForEmotion(emotion),
@@ -607,6 +630,12 @@ Return ONLY the opening line, nothing else.`;
 
   // Send text message (fallback)
   const sendTextMessage = useCallback(async (text: string) => {
+    // Check if max rounds reached
+    if (conversationRounds >= MAX_CONVERSATION_ROUNDS) {
+      setError(`Reached maximum of ${MAX_CONVERSATION_ROUNDS} messages. Please end the session.`);
+      return;
+    }
+    
     // Create the new user message
     const userMessage: VoiceMessage = {
       role: 'user',
@@ -615,6 +644,9 @@ Return ONLY the opening line, nothing else.`;
     };
     
     setMessages(prev => [...prev, userMessage]);
+    
+    // Increment conversation rounds when user sends a message
+    setConversationRounds(prev => prev + 1);
     
     // Build conversation history including the new message
     const historyWithNewMessage = [
@@ -636,7 +668,66 @@ Return ONLY the opening line, nothing else.`;
       content: response,
       timestamp: new Date()
     }]);
-  }, [config, messages]);
+  }, [config, messages, conversationRounds]);
+
+  // Generate end-of-session feedback
+  const generateSessionFeedback = useCallback(async () => {
+    if (messages.length < 2) {
+      setSessionFeedback('Not enough conversation to provide feedback. Try practicing a bit more next time!');
+      return;
+    }
+    
+    setIsGeneratingFeedback(true);
+    
+    try {
+      const { GoogleGenAI } = await import('@google/genai');
+      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+      const ai = new GoogleGenAI({ apiKey });
+      
+      // Build conversation transcript
+      const transcript = messages
+        .map(m => `${m.role === 'user' ? 'User' : 'AI Partner'}: ${m.content}`)
+        .join('\n\n');
+      
+      const prompt = `You are a supportive communication coach. Analyze this roleplay practice session and provide helpful, encouraging feedback.
+
+Context:
+- Character being practiced with: ${config?.persona || 'Professional colleague'}
+- Scenario: ${config?.scenario || 'Professional conversation'}
+- Video context: ${config?.videoContext?.slice(0, 300) || 'General practice'}
+
+Conversation transcript:
+${transcript}
+
+Provide feedback in this format:
+
+**What You Did Well:**
+[2-3 specific things the user did effectively in the conversation]
+
+**Areas to Explore:**
+[1-2 gentle suggestions for things to try next time, framed positively]
+
+**Connection to Video Content:**
+[Brief note on how well the user applied concepts from the video, if applicable]
+
+**Overall Reflection:**
+[2-3 sentences of encouragement and a key takeaway]
+
+Keep the tone warm, constructive, and encouraging. Do not give numerical scores. Focus on growth and learning.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+      });
+      
+      setSessionFeedback(response.text?.trim() || 'Great practice session! Keep working on your communication skills.');
+    } catch (e) {
+      console.error('Failed to generate session feedback:', e);
+      setSessionFeedback('Thanks for practicing! Each conversation helps build your communication skills.');
+    } finally {
+      setIsGeneratingFeedback(false);
+    }
+  }, [messages, config]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -655,10 +746,13 @@ Return ONLY the opening line, nothing else.`;
     maxRecordingTime: MAX_RECORDING_TIME,
     conversationRounds,
     maxConversationRounds: MAX_CONVERSATION_ROUNDS,
+    sessionFeedback,
+    isGeneratingFeedback,
     connect,
     disconnect,
     startRecording,
     stopRecording,
     sendTextMessage,
+    generateSessionFeedback,
   };
 };

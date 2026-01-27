@@ -41,11 +41,14 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
     maxRecordingTime,
     conversationRounds,
     maxConversationRounds,
+    sessionFeedback,
+    isGeneratingFeedback,
     connect,
     disconnect,
     startRecording,
     stopRecording,
     sendTextMessage,
+    generateSessionFeedback,
   } = useVoiceRoleplay(config);
 
   // Auto-scroll messages
@@ -195,11 +198,6 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
                   <span className="text-xs text-white/70">
                     Round {conversationRounds}/{maxConversationRounds}
                   </span>
-                  {conversationRounds >= maxConversationRounds - 1 && (
-                    <span className="text-xs text-yellow-300 animate-pulse">
-                      ⚠️ Nearing limit
-                    </span>
-                  )}
                 </div>
               )}
               
@@ -398,27 +396,70 @@ const VoiceRoleplay: React.FC<VoiceRoleplayProps> = ({ lessonPlan, selectedScena
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Recording Button */}
-              <button
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={isSpeaking || connectionState === 'processing' || connectionState === 'speaking' || conversationRounds >= maxConversationRounds}
-                className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                  isRecording
-                    ? 'bg-red-500 hover:bg-red-600 text-white scale-105'
-                    : isSpeaking || connectionState === 'processing' || connectionState === 'speaking' || conversationRounds >= maxConversationRounds
-                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                }`}
-              >
-                <svg className={`w-6 h-6 ${isRecording ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-                {conversationRounds >= maxConversationRounds ? 'Session Complete' :
-                 isRecording ? 'Stop Recording' : 
-                 isSpeaking || connectionState === 'speaking' ? 'AI Speaking...' :
-                 connectionState === 'processing' ? 'Processing...' :
-                 'Start Recording'}
-              </button>
+              {/* Session Feedback Display */}
+              {sessionFeedback && (
+                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-4 mb-2 max-h-64 overflow-y-auto">
+                  <h4 className="font-semibold text-indigo-800 mb-2 flex items-center gap-2 sticky top-0 bg-gradient-to-r from-indigo-50 to-purple-50 pb-2">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    Session Feedback
+                  </h4>
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed prose prose-sm max-w-none">
+                    {sessionFeedback.split('\n').map((line, i) => (
+                      <p key={i} className={line.startsWith('**') ? 'font-semibold text-indigo-700 mt-3 first:mt-0' : 'mt-1'}>
+                        {line.replace(/\*\*/g, '')}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Session Complete - Show Get Feedback button */}
+              {conversationRounds >= maxConversationRounds && !sessionFeedback && (
+                <button
+                  onClick={generateSessionFeedback}
+                  disabled={isGeneratingFeedback}
+                  className="w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white disabled:opacity-50"
+                >
+                  {isGeneratingFeedback ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Generating Feedback...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Get Session Feedback
+                    </>
+                  )}
+                </button>
+              )}
+              
+              {/* Recording Button - hide when session is complete */}
+              {conversationRounds < maxConversationRounds && (
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={isSpeaking || connectionState === 'processing' || connectionState === 'speaking'}
+                  className={`w-full py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                    isRecording
+                      ? 'bg-red-500 hover:bg-red-600 text-white scale-105'
+                      : isSpeaking || connectionState === 'processing' || connectionState === 'speaking'
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  <svg className={`w-6 h-6 ${isRecording ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                  {isRecording ? 'Stop Recording' : 
+                   isSpeaking || connectionState === 'speaking' ? 'AI Speaking...' :
+                   connectionState === 'processing' ? 'Processing...' :
+                   'Start Recording'}
+                </button>
+              )}
               
               {/* Text mode toggle */}
               <div className="flex items-center justify-between">
