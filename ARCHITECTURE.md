@@ -669,6 +669,108 @@ VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better v
 - [x] ~~Add progress persistence (resume sessions)~~ (v0.7.0 - progressStorage)
 - [x] ~~Integrate unified LearningPanel into App.tsx~~ (v0.7.0 - replaced 3 panels with 1)
 - [x] ~~Complete code review and cleanup~~ (v0.9.0) 
+
+---
+
+## 🚀 Future Roadmap
+
+Ideas for post-hackathon development to make SkillSync a full-fledged learning platform.
+
+### Phase 1: User Accounts & Cloud Sync
+
+| Feature | Description | Implementation |
+|---------|-------------|----------------|
+| **User Authentication** | Google SSO login via Supabase Auth | Replace localStorage with Supabase |
+| **Cloud Storage** | Sync progress, notes, and history across devices | Migrate `storageService.ts` to Supabase client |
+| **User Profiles** | Avatar, display name, learning preferences | New `/profile` route with settings UI |
+| **Session History** | View all past learning sessions | Database table: `sessions(user_id, video_url, mode, completed_at)` |
+
+### Phase 2: Learning Analytics & Tracking
+
+| Feature | Description | Benefit |
+|---------|-------------|---------|
+| **Learning Dashboard** | Visualize videos watched, questions answered, time spent | Motivation through progress visibility |
+| **Skill Proficiency Levels** | Track improvement per skill category (negotiation, electronics, etc.) | Personalized recommendations |
+| **Learning Streaks** | Daily/weekly streak tracking with milestones | Gamification for retention |
+| **Performance Trends** | Charts showing Q&A accuracy over time | Identify strengths and weaknesses |
+| **Spaced Repetition** | Smart reminders to review past content | Better long-term retention |
+
+### Phase 3: Enhanced Learning Panel
+
+| Feature | Description | Notes |
+|---------|-------------|-------|
+| **Bookmarks & Highlights** | Mark important video moments with notes | Timestamp-based annotations |
+| **Custom Question Creation** | Users create their own practice questions | Community-driven content |
+| **Difficulty Adaptation** | AI adjusts question difficulty based on performance | Use evaluation scores to calibrate |
+| **Quiz Mode** | Timed quizzes with scoring and leaderboards | Competitive learning option |
+| **Flashcard Generation** | Auto-generate flashcards from video content | Export to Anki format |
+| **Learning Paths** | Curated sequences of videos for skill mastery | Admin-created or AI-suggested |
+
+### Phase 4: Social & Collaboration
+
+| Feature | Description | Implementation |
+|---------|-------------|----------------|
+| **Share Lesson Plans** | Generate shareable links to lesson plans | Public/private visibility settings |
+| **Study Groups** | Collaborative learning with friends or colleagues | Real-time sync via WebSocket |
+| **Discussion Forums** | Comment threads on videos and questions | Supabase Realtime for live updates |
+| **Leaderboards** | Compare learning progress with community | Weekly/monthly rankings |
+| **Mentor Mode** | Experienced users can review others' roleplay sessions | Peer feedback system |
+
+### Phase 5: Content & Discovery
+
+| Feature | Description | Benefit |
+|---------|-------------|---------|
+| **Playlist Support** | Analyze multiple videos as a learning course | Batch processing with unified progress |
+| **Video Recommendations** | AI suggests related videos based on learning history | Discovery through personalization |
+| **Content Library** | Curated collection of high-quality educational videos | Quality-assured learning materials |
+| **Course Builder** | Create custom courses from any YouTube videos | Educators can build curricula |
+| **Transcript Search** | Search across all analyzed video transcripts | Find specific topics quickly |
+
+### Phase 6: Platform Expansion
+
+| Feature | Description | Technical Approach |
+|---------|-------------|-------------------|
+| **Mobile App** | Native iOS/Android or PWA | React Native or Capacitor |
+| **Offline Mode** | Download lessons for offline learning | Service Workers + IndexedDB |
+| **Push Notifications** | Reminders for spaced repetition, streaks | Firebase Cloud Messaging |
+| **Browser Extension** | Analyze videos directly on YouTube | Chrome/Firefox extension |
+| **API Access** | Developer API for integrations | RESTful API with rate limiting |
+
+### Phase 7: Enterprise Features
+
+| Feature | Description | Target Users |
+|---------|-------------|--------------|
+| **Team Accounts** | Organization-level billing and management | Corporate training departments |
+| **Admin Dashboard** | Track team learning progress and compliance | L&D managers |
+| **Custom Branding** | White-label solution with company branding | Enterprise clients |
+| **LMS Integration** | SCORM/xAPI export for LMS platforms | Corporate training systems |
+| **Analytics Exports** | Detailed reports for training ROI | HR and management |
+| **SSO Integration** | SAML/OIDC for enterprise identity providers | IT security requirements |
+
+### Phase 8: Advanced AI Features
+
+| Feature | Description | Gemini Capability |
+|---------|-------------|-------------------|
+| **Multi-Language Support** | Analyze videos in any language, translate content | Gemini's multilingual understanding |
+| **Voice Cloning** | AI roleplay uses voices similar to video speaker | Advanced TTS with voice samples |
+| **Real-Time Coaching** | Live feedback during roleplay (not turn-based) | Gemini Live API improvements |
+| **Emotion Recognition** | Detect user emotions from voice during roleplay | Audio prosody analysis expansion |
+| **Personalized AI Tutor** | AI adapts teaching style to user preferences | Long-term user context modeling |
+| **Video Summarization** | Generate 1-minute summaries of long videos | Multimodal content compression |
+
+### Technical Debt for Future
+
+| Item | Priority | Effort |
+|------|----------|--------|
+| Migrate to React Query/TanStack Query for API state | Medium | 1 week |
+| Add comprehensive test suite (Vitest + React Testing Library) | High | 2 weeks |
+| Implement proper error boundaries per section | Medium | 2 days |
+| Add Sentry for error monitoring | Medium | 1 day |
+| Set up CI/CD pipeline with GitHub Actions | High | 2 days |
+| Add end-to-end tests with Playwright | Medium | 1 week |
+| Implement proper logging service (replace console.log) | Low | 2 days |
+| Add OpenTelemetry for observability | Low | 3 days |
+
 ---
 
 ## 📝 Changelog
