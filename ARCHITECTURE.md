@@ -638,6 +638,29 @@ VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better v
   - Added `isOthersPlan()` type guard
   - Fixed type error when assigning 'others' mode
 
+### v0.7.3 (2026-01-27) - Timestamp Validation & Model Updates
+- **Fixed Invalid Timestamp Issue** (`services/geminiService.ts`, `App.tsx`):
+  - Bug: Q&A stop points could have timestamps exceeding video duration (e.g., 3:50 for a 2:41 video)
+  - Root cause: Gemini was generating timestamps without strict bounds checking
+  - Fix: Added `videoDurationSeconds` field to schemas (now required)
+  - Fix: Updated prompts to emphasize determining video duration FIRST
+  - Fix: Added explicit instructions that ALL timestamps must be < videoDurationSeconds
+  - Fix: Added post-processing validation in App.tsx to filter out invalid timestamps as safety net
+- **Model Constants Update** (`constants.ts`):
+  - Fixed extra tab characters in model names for `live` and `pro`
+  - Models now: `gemini-3-flash-preview`, `gemini-live-2.5-flash-preview-native-audio-09-2025`, `gemini-3-pro-preview`
+  - SkillSync uses Gemini 3 models (flash-preview) for all video analysis as required for hackathon
+
+### v0.7.2 (2026-01-26) - Mode Detection State Fix
+- **Fixed Stale Panel Issue** (`App.tsx`):
+  - Bug: After "New Video" and entering a technical video URL, the soft-skills panel persisted even though mode was correctly detected as "Technical"
+  - Root cause 1: A `useEffect` hook was auto-calling `loadLesson` whenever `videoId` changed, bypassing the detection flow and using stale `skillMode`
+  - Root cause 2: `loadLesson` used `skillMode` from closure which could be stale due to React's async state updates
+  - Fix: Removed the problematic `useEffect` that auto-loaded on videoId change
+  - Fix: Added `overrideMode` parameter to `loadLesson(id, forceRefresh, overrideMode?)` 
+  - Fix: All `loadLesson` calls now pass mode explicitly to avoid closure timing issues
+  - Proper flow now: `handleUrlSubmit` → detection → `handleConfirmMode` → `loadLesson(id, false, skillMode)`
+
 ### v0.7.1 (2026-01-25) - Auto-Detection & Mode Override Flow
 - **Auto-Detect Video Category** (`services/geminiService.ts`):
   - New `detectVideoMode()` exported function for lightweight category detection

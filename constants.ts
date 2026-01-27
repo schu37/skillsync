@@ -91,9 +91,10 @@ export const ROLEPLAY_PERSONAS = {
 // ============================================
 
 export const GEMINI_MODELS = {
-  flash: 'gemini-2.0-flash',
+  flash: 'gemini-3-flash-preview',
   flashPreview: 'gemini-3-flash-preview',
-  live: 'gemini-2.0-flash-live-001',
+  live: 'gemini-live-2.5-flash-preview-native-audio-09-2025', 
+  pro: 'gemini-3-pro-preview', 
 } as const;
 
 export const MAX_VIDEO_DURATION_MINUTES = 30;

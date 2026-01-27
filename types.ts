@@ -69,7 +69,7 @@ export interface VideoSession {
 
 export interface Component {
   name: string;
-  quantity?: number;
+  quantity: string; // Amount with units (e.g., "2 cups", "½ tsp", "1 large", "×3")
   specifications?: string;
   purpose?: string;
   alternatives?: string[];
@@ -112,6 +112,7 @@ export interface BaseLessonPlan {
   id: string;
   videoUrl: string;
   mode: SkillMode;
+  videoDurationSeconds?: number; // Actual video duration in seconds for timestamp validation
   skillsDetected: string[];
   suitabilityScore: number; // 0-100
   summary: string;
