@@ -578,10 +578,12 @@ const InteractionPanel: React.FC<InteractionPanelProps> = ({
                 )}
               </div>
               
-              <div className="flex gap-2 mt-2">
-                  <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded uppercase">
-                      Suitability: {lessonPlan.suitabilityScore}%
-                  </span>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                  {lessonPlan.contentWarning?.hasConcerns && (
+                    <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded flex items-center gap-1">
+                      ⚠️ Content Warning
+                    </span>
+                  )}
                   {lessonPlan.skillsDetected.slice(0, 3).map(skill => (
                       <span key={skill} className="px-2 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded truncate max-w-[100px]">
                           {skill}

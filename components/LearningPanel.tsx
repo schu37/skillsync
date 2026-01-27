@@ -25,6 +25,7 @@ import { formatTimestamp, copyToClipboard } from '../utils';
 import { evaluateAnswer } from '../services/geminiService';
 import { FeedbackDisplay, LoadingSpinner } from './shared';
 import SafetyBanner from './SafetyBanner';
+import ContentWarningBanner from './ContentWarningBanner';
 import NotesSection from './NotesSection';
 import VideoChatSection from './VideoChatSection';
 import KnowledgeGraph from './KnowledgeGraph';
@@ -183,6 +184,11 @@ const LearningPanel: React.FC<LearningPanelProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Content Warning Banner - shows for any suspicious/fake/misleading content */}
+      {lessonPlan.contentWarning?.hasConcerns && (
+        <ContentWarningBanner warning={lessonPlan.contentWarning} />
       )}
 
       {/* Header */}
@@ -786,7 +792,9 @@ const QATab: React.FC<QATabProps> = ({
                       }`}>
                         {item.evaluation.score}/5
                       </span>
-                      <span className="text-xs text-slate-500">{item.evaluation.strengthsSummary}</span>
+                      {item.evaluation.strengths?.[0] && (
+                        <span className="text-xs text-slate-500">{item.evaluation.strengths[0]}</span>
+                      )}
                     </div>
                   </div>
                 </div>

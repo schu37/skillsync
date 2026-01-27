@@ -524,7 +524,14 @@ interface CachedVideoContext {
   videoContext: string;
   summary: string;
   skillsDetected: string[];
-  suitabilityScore: number;
+  contentWarning?: {
+    hasConcerns: boolean;
+    isSuspicious: boolean;
+    isMisinformation: boolean;
+    isUnsafe: boolean;
+    concerns: string[];
+    recommendation: string;
+  };
   cachedAt: string;
   // Technical mode extras
   projectType?: string;
@@ -591,7 +598,7 @@ export const videoContextCache = {
       videoContext: plan.videoContext,
       summary: plan.summary,
       skillsDetected: plan.skillsDetected,
-      suitabilityScore: plan.suitabilityScore,
+      contentWarning: plan.contentWarning,
     };
     
     if (plan.mode === 'technical') {
