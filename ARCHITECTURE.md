@@ -271,6 +271,7 @@ This project leverages **Gemini 3's cutting-edge capabilities** to transform vid
 | Model | Use Case | Why |
 |-------|----------|-----|
 | `gemini-3-flash-preview` | Video analysis, Q&A, voice roleplay | Native video understanding, audio analysis with prosody, structured output |
+| `gemini-2.5-flash-preview-tts` | Voice synthesis for roleplay | Natural, expressive voices with emotion control |
 
 ### Native Video Input
 
@@ -295,7 +296,26 @@ const response = await ai.models.generateContent({
 All API responses use JSON Schema for type-safe parsing:
 - `SoftSkillsLessonPlanSchema` - Questions focused on interpersonal skills
 - `TechnicalLessonPlanSchema` - Includes parts, tools, build steps
+- `ContentWarningSchema` - Detects suspicious, fake, or misleading content
 - `EvaluationSchema` - Score, strengths, improvements, rewritten answer
+
+### Content Warning System
+
+The AI analyzes video content for trustworthiness and potential issues:
+
+```typescript
+interface ContentWarning {
+  hasConcerns: boolean;           // True if any issues detected
+  warningType?: 'misinformation' | 'unsafe' | 'suspicious';
+  concerns: string[];             // List of specific concerns
+  recommendation?: string;        // Suggested action for user
+}
+```
+
+**Detection Categories**:
+- **misinformation** - False claims, pseudoscience, conspiracy theories
+- **unsafe** - Dangerous practices, harmful procedures
+- **suspicious** - Clickbait, unrealistic claims, fabricated content
 
 ---
 

@@ -23,7 +23,7 @@ interface KnowledgeGraphProps {
 interface ConceptNode {
   id: string;
   label: string;
-  type: 'skill' | 'component' | 'tool' | 'step' | 'question' | 'concept';
+  type: 'skill' | 'component' | 'tool' | 'step' | 'concept';
   color: string;
   timestamp?: number;
   details?: string;
@@ -40,7 +40,6 @@ const TYPE_COLORS: Record<string, { bg: string; border: string; text: string }> 
   component: { bg: 'bg-blue-100', border: 'border-blue-400', text: 'text-blue-700' },
   tool: { bg: 'bg-amber-100', border: 'border-amber-400', text: 'text-amber-700' },
   step: { bg: 'bg-green-100', border: 'border-green-400', text: 'text-green-700' },
-  question: { bg: 'bg-indigo-100', border: 'border-indigo-400', text: 'text-indigo-700' },
   concept: { bg: 'bg-slate-100', border: 'border-slate-400', text: 'text-slate-700' },
 };
 
@@ -61,29 +60,6 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ lessonPlan, onSeekToTim
           label: skill,
           type: 'skill',
           color: 'purple',
-        });
-      });
-    }
-
-    // Add questions as concept nodes
-    if (lessonPlan.stopPoints) {
-      lessonPlan.stopPoints.forEach((sp, i) => {
-        const node: ConceptNode = {
-          id: `q-${i}`,
-          label: sp.question.length > 50 ? sp.question.slice(0, 50) + '...' : sp.question,
-          type: 'question',
-          color: 'indigo',
-          timestamp: sp.timestamp,
-          details: sp.contextSummary,
-        };
-        nodes.push(node);
-
-        // Connect questions to related skills
-        lessonPlan.skillsDetected?.forEach((skill, j) => {
-          if (sp.question.toLowerCase().includes(skill.toLowerCase()) ||
-              sp.contextSummary?.toLowerCase().includes(skill.toLowerCase())) {
-            edges.push({ from: `skill-${j}`, to: `q-${i}`, label: 'tests' });
-          }
         });
       });
     }
@@ -187,7 +163,6 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ lessonPlan, onSeekToTim
     component: '📦 Components',
     tool: '🛠️ Tools',
     step: '📝 Build Steps',
-    question: '❓ Questions',
     concept: '💡 Key Concepts',
   };
 

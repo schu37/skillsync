@@ -94,7 +94,56 @@ export const GEMINI_MODELS = {
   flash: 'gemini-3-flash-preview',
   flashPreview: 'gemini-3-flash-preview',
   live: 'gemini-live-2.5-flash-preview-native-audio-09-2025', 
-  pro: 'gemini-3-pro-preview', 
+  pro: 'gemini-3-pro-preview',
+  tts: 'gemini-2.5-flash-preview-tts', // Text-to-speech model with natural voices
+} as const;
+
+// Gemini TTS Voice options - 30 prebuilt voices with different personalities
+export const GEMINI_TTS_VOICES = {
+  // Bright/Upbeat voices (good for positive emotions)
+  Zephyr: 'Bright',
+  Puck: 'Upbeat',
+  Leda: 'Youthful',
+  Aoede: 'Breezy',
+  Laomedeia: 'Upbeat',
+  Sadachbia: 'Lively',
+  
+  // Firm/Informative voices (good for professional scenarios)
+  Kore: 'Firm',
+  Orus: 'Firm',
+  Charon: 'Informative',
+  Rasalgethi: 'Informative',
+  Alnilam: 'Firm',
+  Schedar: 'Even',
+  
+  // Soft/Gentle voices (good for empathetic scenarios)
+  Achernar: 'Soft',
+  Vindemiatrix: 'Gentle',
+  Sulafat: 'Warm',
+  
+  // Casual/Friendly voices (good for roleplay)
+  Callirrhoe: 'Easy-going',
+  Umbriel: 'Easy-going',
+  Zubenelgenubi: 'Casual',
+  Achird: 'Friendly',
+  
+  // Expressive voices (good for emotional scenarios)
+  Fenrir: 'Excitable',
+  Enceladus: 'Breathy',
+  
+  // Clear/Smooth voices (good for narration)
+  Iapetus: 'Clear',
+  Erinome: 'Clear',
+  Algieba: 'Smooth',
+  Despina: 'Smooth',
+  
+  // Mature/Gravelly voices
+  Gacrux: 'Mature',
+  Algenib: 'Gravelly',
+  
+  // Other
+  Pulcherrima: 'Forward',
+  Sadaltager: 'Knowledgeable',
 } as const;
 
 export const MAX_VIDEO_DURATION_MINUTES = 30;

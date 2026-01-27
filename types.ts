@@ -105,6 +105,19 @@ export interface DesignDecision {
 }
 
 // ============================================
+// CONTENT WARNING (AI Analysis)
+// ============================================
+
+export interface ContentWarning {
+  hasConcerns: boolean;              // True if any concerns detected
+  isSuspicious: boolean;             // Potentially misleading or clickbait
+  isMisinformation: boolean;         // Contains factually incorrect claims
+  isUnsafe: boolean;                 // Contains dangerous advice without proper warnings
+  concerns: string[];                // List of specific concerns
+  recommendation: string;            // AI recommendation for the user
+}
+
+// ============================================
 // LESSON PLANS (Base + Mode-Specific)
 // ============================================
 
@@ -114,7 +127,7 @@ export interface BaseLessonPlan {
   mode: SkillMode;
   videoDurationSeconds?: number; // Actual video duration in seconds for timestamp validation
   skillsDetected: string[];
-  suitabilityScore: number; // 0-100
+  contentWarning?: ContentWarning; // AI analysis of content trustworthiness
   summary: string;
   videoContext: string;
   stopPoints: StopPoint[];

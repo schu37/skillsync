@@ -32,9 +32,11 @@ export const generateMarkdownContent = (
 
 **Mode:** ${isTechnical ? '🔧 Technical Skills' : '💬 Soft Skills'}  
 **Skills:** ${plan.skillsDetected.join(', ')}  
-**Educational Score:** ${plan.suitabilityScore}/100  
 **Generated:** ${new Date().toLocaleDateString()}
-
+${plan.contentWarning?.hasConcerns ? `
+⚠️ **Content Warning:** ${plan.contentWarning.concerns.join('; ')}  
+💡 **Recommendation:** ${plan.contentWarning.recommendation}
+` : ''}
 ---
 
 ## 📝 Summary
@@ -385,8 +387,11 @@ const generatePlainTextContent = (
   let text = `${plan.summary}\n\n`;
   text += `Mode: ${isTechnical ? 'Technical Skills' : 'Soft Skills'}\n`;
   text += `Skills: ${plan.skillsDetected.join(', ')}\n`;
-  text += `Educational Score: ${plan.suitabilityScore}/100\n\n`;
-  text += `---\n\nSummary\n\n${plan.videoContext.slice(0, 1000)}\n\n`;
+  if (plan.contentWarning?.hasConcerns) {
+    text += `Content Warning: ${plan.contentWarning.concerns.join('; ')}\n`;
+    text += `Recommendation: ${plan.contentWarning.recommendation}\n`;
+  }
+  text += `\n---\n\nSummary\n\n${plan.videoContext.slice(0, 1000)}\n\n`;
 
   if (isTechnical) {
     text += `---\n\nParts List\n\n`;

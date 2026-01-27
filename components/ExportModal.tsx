@@ -210,8 +210,10 @@ const ExportModal: React.FC<ExportModalProps> = ({
 
     if (selectedSections.has('summary')) {
       parts.push('## 📋 Summary\n');
-      parts.push(`**Skills:** ${lessonPlan.skillsDetected.join(', ')}`);
-      parts.push(`**Educational Score:** ${lessonPlan.suitabilityScore}/100\n`);
+      parts.push(`**Skills:** ${lessonPlan.skillsDetected.join(', ')}\n`);
+      if (lessonPlan.contentWarning?.hasConcerns) {
+        parts.push(`**⚠️ Content Warning:** ${lessonPlan.contentWarning.concerns.join('; ')}\n`);
+      }
       parts.push(lessonPlan.videoContext.slice(0, 1000));
       parts.push('\n---\n');
     }

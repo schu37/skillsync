@@ -15,6 +15,7 @@ import TermsOfService from './pages/TermsOfService';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import VoiceRoleplay from './components/VoiceRoleplay';
 import ExportModal from './components/ExportModal';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const App: React.FC = () => {
   // State
@@ -675,7 +676,7 @@ const App: React.FC = () => {
                 </p>
               ) : (
                 <p className="text-sm bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
-                  This will re-analyze the video for the new mode. Your current progress will be preserved in cache. You need to click "Re-analyze" again to load the new mode.
+                  This will re-analyze the video for the new mode. Your current progress will be preserved in cache. If re-analyzing does not auto start, you might need to click "Re-analyze" again to load the new mode.
                 </p>
               )}
             </div>
@@ -839,7 +840,7 @@ const App: React.FC = () => {
                 <button
                   onClick={() => loadLesson(videoId, true, skillMode)}
                   title="Re-analyze video with current settings"
-                  className="text-xs px-2 py-1 bg-red-400 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors flex items-center gap-1"
+                  className="text-xs px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors flex items-center gap-1"
                 >
                   🔄 Re-analyze
                 </button>
@@ -1018,6 +1019,7 @@ const App: React.FC = () => {
 
             {/* Right Column: Unified Learning Panel */}
             <div className="lg:col-span-5 xl:col-span-5 flex flex-col gap-4 min-h-[600px]">
+              <ErrorBoundary>
                {lessonPlan && (mode === AppMode.PLAN_READY || mode === AppMode.PLAYING || mode === AppMode.PAUSED_INTERACTION || mode === AppMode.EVALUATING || mode === AppMode.FEEDBACK || mode === AppMode.COMPLETED || mode === AppMode.PACK_READY || mode === AppMode.GENERATING_PACK) ? (
                  <LearningPanel
                    lessonPlan={lessonPlan}
@@ -1067,6 +1069,7 @@ const App: React.FC = () => {
                   onRequestGoogleAuth={googleLogin}
                />
              )}
+              </ErrorBoundary>
             </div>
 
           </div>

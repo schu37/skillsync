@@ -223,115 +223,34 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
     });
   }, [isRecording, config, messages, playAudio]);
 
-  // Text-to-speech with emotion using Google Cloud TTS (with SSML prosody)
+  // Text-to-speech with emotion using Gemini TTS
   const textToSpeechWithEmotion = async (
     text: string,
     emotion: string
   ): Promise<void> => {
-    const apiKey = (import.meta as any).env?.VITE_GOOGLE_TTS_API_KEY;
-    
-    // Fallback to browser TTS if no API key
-    if (!apiKey) {
-      console.warn('No Google TTS API key found, using browser TTS');
-      return textToSpeechBrowserFallback(text, emotion);
-    }
-
     try {
-      // Detect gender from persona for appropriate voice selection
-      const persona = config?.persona || '';
-      const isFemale = /\b(she|her|woman|female|girl|lady|ms\.|mrs\.|miss)\b/i.test(persona);
-      const isMale = /\b(he|him|man|male|boy|gentleman|mr\.|sir)\b/i.test(persona);
+      // Import the Gemini TTS function
+      const { geminiTTS } = await import('../services/geminiService');
       
-      // Select voice based on persona gender
-      let voiceName = 'en-US-Neural2-F'; // Default female
+      console.log(`🎭 Using Gemini TTS with emotion: ${emotion}`);
+      console.log(`🎭 Persona: ${config?.persona?.slice(0, 50)}...`);
       
-      if (isMale && !isFemale) {
-        // Male persona detected
-        voiceName = 'en-US-Neural2-J'; // Male, casual/friendly
-      } else if (persona.toLowerCase().includes('professional') || persona.toLowerCase().includes('executive')) {
-        // Professional context
-        voiceName = isMale ? 'en-US-Neural2-A' : 'en-US-Neural2-F'; // Formal voices
-      }
+      // Generate audio using Gemini TTS with emotion and persona context
+      const audioBlob = await geminiTTS({
+        text: text,
+        emotion: emotion,
+        persona: config?.persona,
+        style: getStyleForEmotion(emotion),
+      });
       
-      console.log(`🎭 Detected persona: ${persona.slice(0, 50)}...`);
-      console.log(`🔊 Selected voice: ${voiceName} (${isMale ? 'male' : 'female'})`);
-      
-      // Map emotion to SSML prosody attributes
-      let rate = '100%'; // normal
-      let pitch = '+0st'; // semitones
-      let volume = 'medium';
-      
-      switch (emotion) {
-        case 'impatient':
-        case 'frustrated':
-          rate = '110%';
-          pitch = '+3st';
-          volume = 'medium';
-          break;
-        case 'grateful':
-        case 'friendly':
-          rate = '95%';
-          pitch = '+2st';
-          volume = 'medium';
-          break;
-        case 'angry':
-        case 'dismissive':
-          rate = '105%';
-          pitch = '-2st';
-          volume = 'loud';
-          break;
-        case 'skeptical':
-        case 'curious':
-          rate = '92%';
-          pitch = '-1st';
-          volume = 'medium';
-          break;
-        default:
-          rate = '100%';
-          pitch = '+0st';
-          volume = 'medium';
-      }
-      
-      // Build SSML with prosody
-      const ssml = `<speak><prosody rate="${rate}" pitch="${pitch}" volume="${volume}">${text}</prosody></speak>`;
-      
-      // Call Google Cloud TTS API
-      const response = await fetch(
-        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input: { ssml },
-            voice: {
-              languageCode: 'en-US',
-              name: voiceName, // Dynamic voice selection based on persona
-            },
-            audioConfig: {
-              audioEncoding: 'MP3',
-              speakingRate: 1.0,
-              pitch: 0.0,
-            },
-          }),
-        }
-      );
-      
-      if (!response.ok) {
-        throw new Error(`TTS API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const audioContent = data.audioContent; // base64 encoded MP3
-      
-      // Convert base64 to blob and play
-      const audioBlob = base64ToBlob(audioContent, 'audio/mp3');
+      // Play the generated audio
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       
       return new Promise((resolve, reject) => {
         audio.onended = () => {
           URL.revokeObjectURL(audioUrl);
-          console.log('🔊 Google TTS finished');
+          console.log('🔊 Gemini TTS finished');
           resolve();
         };
         audio.onerror = (err) => {
@@ -339,25 +258,46 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
           console.error('🔊 Audio playback error:', err);
           reject(err);
         };
-        console.log('🔊 Playing Google TTS with emotion:', emotion);
+        console.log('🔊 Playing Gemini TTS audio');
         audio.play();
       });
       
     } catch (err) {
-      console.error('🔊 Google TTS error, falling back to browser TTS:', err);
+      console.error('🔊 Gemini TTS error, falling back to browser TTS:', err);
       return textToSpeechBrowserFallback(text, emotion);
     }
   };
   
-  // Helper: Convert base64 to Blob
-  const base64ToBlob = (base64: string, mimeType: string): Blob => {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
+  // Get style direction for the given emotion
+  const getStyleForEmotion = (emotion: string): string => {
+    const emotionLower = emotion.toLowerCase();
+    
+    if (emotionLower.includes('angry') || emotionLower.includes('furious')) {
+      return 'Speak with intensity, sharper consonants, slightly raised volume';
     }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
+    if (emotionLower.includes('impatient') || emotionLower.includes('frustrated')) {
+      return 'Speak quickly with clipped words, sighing undertones, slight irritation';
+    }
+    if (emotionLower.includes('friendly') || emotionLower.includes('warm')) {
+      return 'Speak warmly with a smile in your voice, relaxed pace';
+    }
+    if (emotionLower.includes('skeptical') || emotionLower.includes('doubtful')) {
+      return 'Speak with raised eyebrows tone, questioning inflection, slight pause before key words';
+    }
+    if (emotionLower.includes('dismissive')) {
+      return 'Speak flatly with disinterest, trailing off at ends of sentences';
+    }
+    if (emotionLower.includes('encouraging')) {
+      return 'Speak with enthusiasm, upward inflections, supportive warmth';
+    }
+    if (emotionLower.includes('sad') || emotionLower.includes('sympathetic')) {
+      return 'Speak softly, slower pace, gentle and caring';
+    }
+    if (emotionLower.includes('excited') || emotionLower.includes('enthusiastic')) {
+      return 'Speak with high energy, faster pace, animated delivery';
+    }
+    
+    return 'Speak naturally and conversationally';
   };
   
   // Fallback: Browser TTS (lower quality)

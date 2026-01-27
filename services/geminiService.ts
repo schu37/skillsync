@@ -15,7 +15,7 @@ import { GEMINI_MODELS, STOP_POINTS_GUIDANCE, QUESTION_TYPES } from "../constant
 // ============================================
 // DEBUG LOGGING
 // ============================================
-const DEBUG = true; // Set to false in production
+const DEBUG = (import.meta as any).env?.DEV ?? false; // Automatically false in production builds
 
 const logApi = (label: string, data: any) => {
   if (DEBUG) {
@@ -57,6 +57,19 @@ const normalizeYouTubeUrl = (urlOrId: string): string => {
 // SCHEMAS
 // ============================================
 
+const ContentWarningSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    hasConcerns: { type: Type.BOOLEAN, description: "True if any content concerns were detected" },
+    isSuspicious: { type: Type.BOOLEAN, description: "True if content appears misleading, clickbait, or makes extraordinary claims" },
+    isMisinformation: { type: Type.BOOLEAN, description: "True if content contains factually incorrect or debunked claims" },
+    isUnsafe: { type: Type.BOOLEAN, description: "True if content shows dangerous practices without proper safety warnings" },
+    concerns: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific concerns detected (e.g., 'Claims miracle cure without evidence')" },
+    recommendation: { type: Type.STRING, description: "Brief recommendation for the user (e.g., 'Verify claims with authoritative sources')" },
+  },
+  required: ["hasConcerns", "isSuspicious", "isMisinformation", "isUnsafe", "concerns", "recommendation"],
+};
+
 const ScoringCriterionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -91,14 +104,14 @@ const SoftSkillsLessonPlanSchema: Schema = {
   properties: {
     videoDurationSeconds: { type: Type.NUMBER, description: "The ACTUAL total duration of the video in seconds. MUST be accurate." },
     skillsDetected: { type: Type.ARRAY, items: { type: Type.STRING } },
-    suitabilityScore: { type: Type.NUMBER, description: "0 to 100 score indicating how educational the video is." },
+    contentWarning: ContentWarningSchema,
     summary: { type: Type.STRING },
     videoContext: { type: Type.STRING, description: "Detailed summary of the video content for grounding." },
     stopPoints: { type: Type.ARRAY, items: StopPointSchema },
     scenarioPreset: { type: Type.STRING, description: "The scenario type detected (negotiation, interview, etc.)" },
     rolePlayPersona: { type: Type.STRING, description: "A persona description for voice roleplay practice." },
   },
-  required: ["videoDurationSeconds", "skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints"],
+  required: ["videoDurationSeconds", "skillsDetected", "contentWarning", "summary", "videoContext", "stopPoints"],
 };
 
 const ComponentSchema: Schema = {
@@ -157,7 +170,7 @@ const TechnicalLessonPlanSchema: Schema = {
   properties: {
     videoDurationSeconds: { type: Type.NUMBER, description: "The ACTUAL total duration of the video in seconds. MUST be accurate." },
     skillsDetected: { type: Type.ARRAY, items: { type: Type.STRING } },
-    suitabilityScore: { type: Type.NUMBER },
+    contentWarning: ContentWarningSchema,
     summary: { type: Type.STRING },
     videoContext: { type: Type.STRING },
     stopPoints: { type: Type.ARRAY, items: StopPointSchema },
@@ -171,7 +184,7 @@ const TechnicalLessonPlanSchema: Schema = {
     safetyOverview: { type: Type.STRING },
     requiredPrecautions: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
-  required: ["videoDurationSeconds", "skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints", "projectType", "components", "tools", "buildSteps", "designDecisions"],
+  required: ["videoDurationSeconds", "skillsDetected", "contentWarning", "summary", "videoContext", "stopPoints", "projectType", "components", "tools", "buildSteps", "designDecisions"],
 };
 
 const EvidenceQuoteSchema: Schema = {
@@ -442,7 +455,16 @@ WATCH THE VIDEO CAREFULLY and perform these tasks:
 ⚠️ FIRST: Determine the EXACT video duration in seconds and store it in videoDurationSeconds. This is CRITICAL for timestamp validation.
 
 1. IDENTIFY 1-3 key soft skills being demonstrated or taught
-2. RATE the video's educational value (0-100) for skill development
+2. ANALYZE CONTENT TRUSTWORTHINESS - Generate a contentWarning object:
+   - hasConcerns: true if ANY of the below flags are true
+   - isSuspicious: true if content uses clickbait, makes extraordinary claims, or appears misleading
+   - isMisinformation: true if content contains factually incorrect, debunked, or pseudoscientific claims
+   - isUnsafe: true if content shows dangerous practices without proper safety warnings
+   - concerns: List specific concerns (e.g., "Claims guaranteed success without evidence", "Manipulative tactics presented as legitimate")
+   - recommendation: Brief advice for users (e.g., "Verify claims independently", "Consider ethical implications")
+   
+   SET hasConcerns=false and empty concerns array if video appears legitimate and trustworthy.
+
 3. CREATE a detailed summary of the video content
 4. DETERMINE the optimal number of questions based on:
 ${STOP_POINTS_GUIDANCE}
@@ -508,7 +530,7 @@ Be specific and reference actual content from the video, not generic advice.
     logApi('generateSoftSkillsLessonPlan - Parsed', { 
       stopPointsCount: result.stopPoints?.length,
       skills: result.skillsDetected,
-      score: result.suitabilityScore 
+      hasConcerns: result.contentWarning?.hasConcerns 
     });
     return result;
   } catch (e) {
@@ -544,7 +566,17 @@ WATCH THE VIDEO CAREFULLY and perform these tasks:
 
 1. IDENTIFY the project type and difficulty level (beginner/intermediate/advanced)
 
-2. EXTRACT **EVERY SINGLE** component/ingredient/part/material mentioned in the video:
+2. ANALYZE CONTENT TRUSTWORTHINESS - Generate a contentWarning object:
+   - hasConcerns: true if ANY of the below flags are true
+   - isSuspicious: true if content uses clickbait, makes extraordinary claims, or appears misleading
+   - isMisinformation: true if content contains factually incorrect, debunked, or pseudoscientific claims
+   - isUnsafe: true if content shows DANGEROUS practices without proper safety warnings (electrical hazards, chemical reactions, structural risks, etc.)
+   - concerns: List specific concerns (e.g., "No safety glasses worn while grinding", "Incorrect wiring could cause fire")
+   - recommendation: Brief advice for users (e.g., "Always wear PPE", "Consult a licensed electrician")
+   
+   SET hasConcerns=false and empty concerns array if video appears legitimate and follows proper safety practices.
+
+3. EXTRACT **EVERY SINGLE** component/ingredient/part/material mentioned in the video:
    - COOKING: ALL ingredients with EXACT measurements (e.g., "2 cups flour", "½ tsp salt", "1 large onion")
    - ELECTRONICS: ALL components with specifications (e.g., "10kΩ resistor", "Arduino Uno", "5V power supply")
    - WOODWORKING: ALL materials with dimensions (e.g., "2x4 lumber, 8ft", "wood screws #8 x 1.5in")
@@ -935,7 +967,7 @@ Be creative and explore angles not covered in previous questions.
       mode: 'soft',
       createdAt: new Date().toISOString(),
       skillsDetected: context.skillsDetected,
-      suitabilityScore: context.suitabilityScore,
+      contentWarning: context.contentWarning,
       summary: context.summary,
       videoContext: context.videoContext,
       stopPoints: parsed.stopPoints || [],
@@ -1009,7 +1041,7 @@ Be creative and explore angles not covered in previous questions.
       mode: 'technical' as const,
       createdAt: new Date().toISOString(),
       skillsDetected: context.skillsDetected,
-      suitabilityScore: context.suitabilityScore,
+      contentWarning: context.contentWarning,
       summary: context.summary,
       videoContext: context.videoContext,
       stopPoints: parsed.stopPoints || [],
@@ -1089,7 +1121,7 @@ Be creative and explore angles not covered in previous questions.
       mode: 'others',
       createdAt: new Date().toISOString(),
       skillsDetected: context.skillsDetected,
-      suitabilityScore: context.suitabilityScore,
+      contentWarning: context.contentWarning,
       summary: context.summary,
       videoContext: context.videoContext,
       stopPoints: parsed.stopPoints || [],
@@ -1425,4 +1457,203 @@ Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
       voiceDirection: 'speak normally'
     };
   }
+};
+
+// ============================================
+// GEMINI TEXT-TO-SPEECH (TTS)
+// ============================================
+
+export interface GeminiTTSConfig {
+  text: string;
+  voiceName?: string;       // One of the 30 prebuilt voices (default: 'Kore')
+  emotion?: string;         // Emotional direction (e.g., 'impatient', 'friendly')
+  persona?: string;         // Character description for context
+  style?: string;           // Additional style guidance
+}
+
+/**
+ * Generate natural speech audio using Gemini TTS model.
+ * Returns raw PCM audio data (16-bit, 24kHz, mono) as a Blob.
+ * 
+ * This uses the gemini-2.5-flash-preview-tts model which provides:
+ * - 30 expressive prebuilt voices
+ * - Natural language style control
+ * - Emotional expression through prompts
+ */
+export const geminiTTS = async (config: GeminiTTSConfig): Promise<Blob> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  
+  // Select voice based on emotion or persona
+  const voiceName = config.voiceName || selectVoiceForEmotion(config.emotion || 'neutral');
+  
+  // Build the TTS prompt with style direction
+  const prompt = buildTTSPrompt(config);
+  
+  logApi('geminiTTS', { voiceName, emotion: config.emotion, textLength: config.text.length });
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODELS.tts,
+      contents: prompt,
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: voiceName,
+            },
+          },
+        },
+      },
+    });
+    
+    // Extract audio data from response
+    const candidate = response.candidates?.[0];
+    const part = candidate?.content?.parts?.[0];
+    
+    if (part?.inlineData?.data) {
+      // The API returns base64 encoded PCM audio
+      const audioData = base64ToArrayBuffer(part.inlineData.data);
+      
+      // Convert raw PCM to WAV for browser playback
+      const wavBlob = pcmToWav(audioData, 24000, 1, 16);
+      
+      logApi('geminiTTS success', { 
+        audioSize: wavBlob.size,
+        voice: voiceName 
+      });
+      
+      return wavBlob;
+    }
+    
+    throw new Error('No audio data in response');
+    
+  } catch (e) {
+    console.error('Gemini TTS error:', e);
+    throw e;
+  }
+};
+
+/**
+ * Select the best voice based on the emotional tone needed.
+ */
+const selectVoiceForEmotion = (emotion: string): string => {
+  const emotionLower = emotion.toLowerCase();
+  
+  // Map emotions to appropriate voices
+  if (emotionLower.includes('angry') || emotionLower.includes('frustrated') || emotionLower.includes('impatient')) {
+    return 'Kore'; // Firm voice for assertive/tense emotions
+  }
+  if (emotionLower.includes('friendly') || emotionLower.includes('warm') || emotionLower.includes('encouraging')) {
+    return 'Achird'; // Friendly voice
+  }
+  if (emotionLower.includes('skeptical') || emotionLower.includes('dismissive')) {
+    return 'Charon'; // Informative but can sound skeptical
+  }
+  if (emotionLower.includes('excited') || emotionLower.includes('enthusiastic')) {
+    return 'Fenrir'; // Excitable voice
+  }
+  if (emotionLower.includes('calm') || emotionLower.includes('soothing')) {
+    return 'Sulafat'; // Warm voice
+  }
+  if (emotionLower.includes('professional') || emotionLower.includes('neutral')) {
+    return 'Orus'; // Firm but neutral
+  }
+  if (emotionLower.includes('casual') || emotionLower.includes('relaxed')) {
+    return 'Zubenelgenubi'; // Casual voice
+  }
+  if (emotionLower.includes('sad') || emotionLower.includes('sympathetic')) {
+    return 'Achernar'; // Soft voice
+  }
+  
+  // Default to a versatile voice
+  return 'Kore';
+};
+
+/**
+ * Build a rich TTS prompt that includes style direction.
+ */
+const buildTTSPrompt = (config: GeminiTTSConfig): string => {
+  const { text, emotion, persona, style } = config;
+  
+  // If no style guidance, just return the text
+  if (!emotion && !persona && !style) {
+    return text;
+  }
+  
+  // Build director's notes for more expressive output
+  let prompt = '';
+  
+  if (persona || style) {
+    prompt += `### DIRECTOR'S NOTES\n`;
+    if (persona) {
+      prompt += `Character: ${persona}\n`;
+    }
+    if (emotion) {
+      prompt += `Emotion: Speak with ${emotion} tone\n`;
+    }
+    if (style) {
+      prompt += `Style: ${style}\n`;
+    }
+    prompt += `\n### TRANSCRIPT\n`;
+  } else if (emotion) {
+    // Simple emotion prefix
+    prompt += `Say with ${emotion} emotion: `;
+  }
+  
+  prompt += text;
+  
+  return prompt;
+};
+
+/**
+ * Convert base64 string to ArrayBuffer
+ */
+const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+/**
+ * Convert raw PCM data to WAV format for browser playback.
+ * Gemini TTS returns 16-bit PCM at 24kHz.
+ */
+const pcmToWav = (pcmData: ArrayBuffer, sampleRate: number, numChannels: number, bitsPerSample: number): Blob => {
+  const pcmBytes = new Uint8Array(pcmData);
+  const wavBuffer = new ArrayBuffer(44 + pcmBytes.length);
+  const view = new DataView(wavBuffer);
+  
+  // WAV header
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+  
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + pcmBytes.length, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM format
+  view.setUint16(20, 1, true); // Audio format (1 = PCM)
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, pcmBytes.length, true);
+  
+  // Copy PCM data
+  const wavBytes = new Uint8Array(wavBuffer);
+  wavBytes.set(pcmBytes, 44);
+  
+  return new Blob([wavBuffer], { type: 'audio/wav' });
 };
