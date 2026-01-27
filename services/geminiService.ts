@@ -1571,6 +1571,84 @@ const selectVoiceForEmotion = (emotion: string): string => {
 };
 
 /**
+ * Select a consistent voice for an entire roleplay session based on persona description.
+ * This is called ONCE at session start and the same voice is used for all rounds.
+ * Exported so it can be used by the voice roleplay hook.
+ */
+export const selectVoiceForPersona = (persona: string): string => {
+  const personaLower = persona.toLowerCase();
+  
+  // Check for gender/character hints
+  const isMale = personaLower.includes('he ') || 
+                 personaLower.includes('his ') || 
+                 personaLower.includes('man') || 
+                 personaLower.includes('male') ||
+                 personaLower.includes('boss') ||
+                 personaLower.includes('sir') ||
+                 personaLower.includes('mr.');
+  
+  const isFemale = personaLower.includes('she ') || 
+                   personaLower.includes('her ') || 
+                   personaLower.includes('woman') || 
+                   personaLower.includes('female') ||
+                   personaLower.includes('ms.') ||
+                   personaLower.includes('mrs.') ||
+                   personaLower.includes('miss');
+
+  // Check for personality traits
+  const isAggressive = personaLower.includes('angry') || 
+                       personaLower.includes('frustrated') || 
+                       personaLower.includes('demanding') ||
+                       personaLower.includes('impatient') ||
+                       personaLower.includes('difficult');
+  
+  const isFriendly = personaLower.includes('friendly') || 
+                     personaLower.includes('warm') || 
+                     personaLower.includes('nice') ||
+                     personaLower.includes('kind') ||
+                     personaLower.includes('supportive');
+  
+  const isProfessional = personaLower.includes('professional') || 
+                         personaLower.includes('executive') || 
+                         personaLower.includes('manager') ||
+                         personaLower.includes('interviewer') ||
+                         personaLower.includes('formal');
+  
+  const isSkeptical = personaLower.includes('skeptic') || 
+                      personaLower.includes('doubt') || 
+                      personaLower.includes('critical') ||
+                      personaLower.includes('questioning');
+  
+  // Select voice based on personality + gender combination
+  if (isAggressive) {
+    return isFemale ? 'Kore' : 'Orus'; // Firm voices
+  }
+  
+  if (isSkeptical) {
+    return isFemale ? 'Charon' : 'Puck'; // Informative/upbeat but can sound skeptical
+  }
+  
+  if (isProfessional) {
+    return isFemale ? 'Kore' : 'Orus'; // Firm professional voices
+  }
+  
+  if (isFriendly) {
+    return isFemale ? 'Achird' : 'Fenrir'; // Friendly/excitable voices
+  }
+  
+  // Default voices based on gender
+  if (isFemale) {
+    return 'Sulafat'; // Warm voice
+  }
+  if (isMale) {
+    return 'Charon'; // Informative voice
+  }
+  
+  // Ultimate default - versatile voice
+  return 'Kore';
+};
+
+/**
  * Build a rich TTS prompt that includes style direction.
  */
 const buildTTSPrompt = (config: GeminiTTSConfig): string => {

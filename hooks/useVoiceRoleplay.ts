@@ -33,6 +33,7 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
   const audioChunks = useRef<Blob[]>([]);
   const mediaStream = useRef<MediaStream | null>(null);
   const timerInterval = useRef<NodeJS.Timeout | null>(null);
+  const sessionVoice = useRef<string | null>(null); // Fixed voice for entire session
 
   // Helper to convert blob to base64
   const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -83,12 +84,8 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
       mediaStream.current = stream;
       console.log('🎙️ Microphone access granted');
       
-      // Add welcome message
-      setMessages([{
-        role: 'assistant',
-        content: 'Ready to practice! Click "Start Recording" to begin.',
-        timestamp: new Date()
-      }]);
+      // Generate an in-character opening line with voice
+      await generateOpeningLine();
       
     } catch (e) {
       console.error('Microphone access error:', e);
@@ -96,6 +93,99 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
       setConnectionState('error');
     }
   }, [config]);
+  
+  // Generate an in-character opening line with TTS
+  const generateOpeningLine = async () => {
+    setConnectionState('processing');
+    
+    try {
+      const { geminiTTS, selectVoiceForPersona } = await import('../services/geminiService');
+      const { GoogleGenAI } = await import('@google/genai');
+      
+      // Select a voice for this session based on persona (ONCE)
+      // This voice will be used for ALL rounds of conversation
+      if (!sessionVoice.current) {
+        sessionVoice.current = selectVoiceForPersona(config?.persona || '');
+        console.log(`🎭 Session voice selected: ${sessionVoice.current} (will be used for all rounds)`);
+      }
+      
+      // Get API key
+      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+      const ai = new GoogleGenAI({ apiKey });
+      
+      // Generate an in-character opening line
+      const prompt = `You are playing this character in a roleplay scenario:
+      
+Character: ${config?.persona || 'A professional colleague'}
+Scenario: ${config?.scenario || 'Professional conversation'}
+Context: ${config?.videoContext?.slice(0, 200) || 'General practice'}
+
+Generate a SHORT (1-2 sentences) opening line that this character would say to start the conversation. 
+Stay completely in character. Don't break the fourth wall.
+Make it natural and appropriate for the scenario.
+
+Return ONLY the opening line, nothing else.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+      });
+      
+      const openingLine = response.text?.trim() || "Alright, let's get started. What did you want to discuss?";
+      
+      // Pre-generate the audio with the session voice
+      const audioBlob = await geminiTTS({
+        text: openingLine,
+        voiceName: sessionVoice.current!, // Use fixed session voice
+        emotion: 'neutral',
+        persona: config?.persona,
+        style: 'Speak naturally as if starting a conversation',
+      });
+      
+      // Show message and play audio together
+      setMessages([{
+        role: 'assistant',
+        content: openingLine,
+        emotion: 'neutral',
+        timestamp: new Date()
+      }]);
+      
+      setConnectionState('speaking');
+      await playAudioBlobInternal(audioBlob);
+      setConnectionState('ready');
+      
+    } catch (e) {
+      console.error('Failed to generate opening line:', e);
+      // Fallback to static message without voice
+      setMessages([{
+        role: 'assistant',
+        content: 'Ready to practice! Click "Start Recording" to begin.',
+        timestamp: new Date()
+      }]);
+      setConnectionState('ready');
+    }
+  };
+  
+  // Internal helper to play audio blob (used before playAudioBlob is defined)
+  const playAudioBlobInternal = async (audioBlob: Blob): Promise<void> => {
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    
+    setIsSpeaking(true);
+    return new Promise((resolve, reject) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        resolve();
+      };
+      audio.onerror = (err) => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        reject(err);
+      };
+      audio.play();
+    });
+  };
 
   // Start recording
   const startRecording = useCallback(async () => {
@@ -185,7 +275,12 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
             timestamp: new Date()
           }]);
           
-          // Add assistant message
+          // Generate TTS audio BEFORE showing assistant message
+          // This prevents the 5s delay between message appearing and voice playing
+          setConnectionState('speaking');
+          const audioBlob2 = await generateTTSAudio(result.responseText, result.emotionalTone);
+          
+          // Now add assistant message and play audio simultaneously
           setMessages(prev => [...prev, {
             role: 'assistant',
             content: result.responseText,
@@ -193,9 +288,10 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
             timestamp: new Date()
           }]);
           
-          // Play voice response with emotion using TTS
-          setConnectionState('speaking');
-          await textToSpeechWithEmotion(result.responseText, result.emotionalTone);
+          // Play the pre-generated audio immediately
+          if (audioBlob2) {
+            await playAudioBlob(audioBlob2);
+          }
           setConnectionState('ready');
           
           // Increment conversation rounds
@@ -223,7 +319,59 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
     });
   }, [isRecording, config, messages, playAudio]);
 
-  // Text-to-speech with emotion using Gemini TTS
+  // Generate TTS audio blob without playing (for pre-generation)
+  const generateTTSAudio = async (
+    text: string,
+    emotion: string
+  ): Promise<Blob | null> => {
+    try {
+      const { geminiTTS } = await import('../services/geminiService');
+      
+      console.log(`🎭 Pre-generating Gemini TTS with emotion: ${emotion}, voice: ${sessionVoice.current}`);
+      
+      const audioBlob = await geminiTTS({
+        text: text,
+        voiceName: sessionVoice.current || undefined, // Use fixed session voice
+        emotion: emotion,
+        persona: config?.persona,
+        style: getStyleForEmotion(emotion),
+      });
+      
+      console.log(`🔊 Audio pre-generated, size: ${audioBlob.size}`);
+      return audioBlob;
+      
+    } catch (err) {
+      console.error('🔊 Gemini TTS generation error:', err);
+      // Return null, caller will handle fallback
+      return null;
+    }
+  };
+  
+  // Play an audio blob
+  const playAudioBlob = async (audioBlob: Blob): Promise<void> => {
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    
+    setIsSpeaking(true);
+    return new Promise((resolve, reject) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        console.log('🔊 Audio playback finished');
+        resolve();
+      };
+      audio.onerror = (err) => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        console.error('🔊 Audio playback error:', err);
+        reject(err);
+      };
+      console.log('🔊 Playing audio immediately');
+      audio.play();
+    });
+  };
+
+  // Text-to-speech with emotion using Gemini TTS (legacy, still used for fallback)
   const textToSpeechWithEmotion = async (
     text: string,
     emotion: string
@@ -232,12 +380,13 @@ export const useVoiceRoleplay = (config: VoiceRoleplayConfig | null) => {
       // Import the Gemini TTS function
       const { geminiTTS } = await import('../services/geminiService');
       
-      console.log(`🎭 Using Gemini TTS with emotion: ${emotion}`);
+      console.log(`🎭 Using Gemini TTS with emotion: ${emotion}, voice: ${sessionVoice.current}`);
       console.log(`🎭 Persona: ${config?.persona?.slice(0, 50)}...`);
       
       // Generate audio using Gemini TTS with emotion and persona context
       const audioBlob = await geminiTTS({
         text: text,
+        voiceName: sessionVoice.current || undefined, // Use fixed session voice
         emotion: emotion,
         persona: config?.persona,
         style: getStyleForEmotion(emotion),
