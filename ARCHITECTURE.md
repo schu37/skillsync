@@ -1,7 +1,7 @@
 # SkillSync Architecture & Design Document
 
-> **Last Updated**: January 25, 2026  
-> **Version**: 0.7.0  
+> **Last Updated**: January 28, 2026  
+> **Version**: 0.9.1  
 > **Hackathon**: Google Gemini 3 Devpost ($100K Prize Pool)  
 > **Deadline**: Jan 30, 2026
 
@@ -206,6 +206,8 @@ const MODE_CONFIG: Record<SkillMode, ModeConfig> = {
 | **Markdown Export** | ✅ Done | P1 | Download full session |
 | **Google Docs Export** | ✅ Done | P1 | OAuprosody analysis integration |
 | **Voice Roleplay in Chat** | ✅ Done | P1 | Integrated into Roleplay tab |
+| **Voice Session Feedback** | ✅ Done | P1 | Qualitative end-of-session feedback |
+| **Consistent Voice Personas** | ✅ Done | P1 | Same voice throughout session |
 | **Sticky Tabs** | ✅ Done | P1 | Q&A/Notes/Chat tabs always visible |
 | **Mode Switching** | ✅ Done | P1 | Change soft/technical after video load |
 | **Unified Notes** | ✅ Done | P1 | Single notes area with AI toggle |
@@ -465,6 +467,17 @@ const ROLEPLAY_PERSONAS = [
 - AI responds with emotional context
 - Text-to-Speech output with adjusted prosody (rate/pitch)
 - Text chat fallback mode available
+- **User-directed conversations**: AI asks what user wants to discuss (not skills/scenarios)
+- **Session feedback**: End-of-session qualitative feedback (no numerical scores)
+- **Consistent voice**: Same voice persona maintained throughout entire session
+- **8-round limit**: Counts user messages, not full exchanges
+
+### Voice Gender Mapping (Gemini TTS API)
+
+| Gender | Voices |
+|--------|--------|
+| Male | Achird, Algenib, Algieba, Alnilam, Charon, Orus, Puck, Fenrir, Iapetus, Enceladus, Umbriel, Gacrux, Sadaltager |
+| Female | Achernar, Aoede, Autonoe, Callirrhoe, Kore, Leda, Zephyr, Erinome, Despina, Laomedeia, Schedar, Pulcherrima, Sulafat, Vindemiatrix, Rasalgethi, Sadachbia |
 
 ### Why Turn-Based vs Real-Time?
 
@@ -628,18 +641,97 @@ VITE_GOOGLE_TTS_API_KEY=xxx          # Optional - Google Cloud TTS (for better v
 
 ## 🐛 Known Issues & TODOs
 
+### Critical Bugs (Blocking)
+- [x] ~~**TypeScript Errors in InteractionPanel.tsx**: Type narrowing issue with `AppMode` enum comparisons~~ (v0.9.0)
+- [x] ~~**Deprecated InteractionPanel**: Still used as fallback in App.tsx despite LearningPanel being the primary component~~ (v0.9.0)
+
 ### Bugs
 - [ ] YouTube Shorts may have playback issues in some browsers
 - [ ] Long videos (>30min) may timeout on analysis
 - [ ] Mobile responsive improvements
 
+### Code Quality Issues (Identified in v0.9.0 Review)
+- [x] ~~`InteractionPanel.tsx` has stale type definitions - missing `EVALUATING` and `LOADING_PLAN` from mode prop~~ (v0.9.0)
+- [x] ~~Duplicate code between InteractionPanel and LearningPanel~~ (v0.9.0 - removed InteractionPanel)
+- [x] ~~`any` types used in multiple places in geminiService.ts~~ (v0.9.0)
+- [x] ~~Missing null safety checks in several components~~ (v0.9.0)
+- [ ] Console.log statements should use debug logging utility consistently
+- [ ] Missing loading states for some async operations
+
+### Architecture Improvements
+- [x] ~~Remove InteractionPanel.tsx and rely solely on LearningPanel~~ (v0.9.0)
+- [x] ~~Consolidate shared types into proper interfaces~~ (v0.9.0)
+- [ ] Consider using React Query/SWR for API state management
+- [ ] Add proper error boundary around each major section
+
 ### TODOs
 - [x] ~~Create nodes and trees or flow charts about how each knowledge points are interconnected~~ (v0.7.0 - KnowledgeGraph)
 - [x] ~~Add progress persistence (resume sessions)~~ (v0.7.0 - progressStorage)
-- [x] ~~Integrate unified LearningPanel into App.tsx~~ (v0.7.0 - replaced 3 panels with 1) 
+- [x] ~~Integrate unified LearningPanel into App.tsx~~ (v0.7.0 - replaced 3 panels with 1)
+- [x] ~~Complete code review and cleanup~~ (v0.9.0) 
 ---
 
 ## 📝 Changelog
+
+### v0.9.1 (2026-01-28) - Voice Roleplay Improvements
+- **User-Directed Conversations** (`hooks/useVoiceRoleplay.ts`):
+  - AI opening line now asks what user wants to discuss naturally
+  - Removed explicit mentions of "skills", "practice", "session", "scenario"
+  - Examples: "What brings you to my office today?" vs "What skill would you like to practice?"
+- **Removed Approaching Limit Notifications**:
+  - Deleted "Approaching conversation limit" warnings for both voice and text modes
+  - Cleaner UX without disruptive mid-session notifications
+- **End-of-Session Feedback** (`hooks/useVoiceRoleplay.ts`, `components/VoiceRoleplay.tsx`):
+  - New "Get Session Feedback" button appears when 8 rounds completed
+  - Generates qualitative text feedback (no numerical scores)
+  - Feedback sections: "What You Did Well", "Areas to Explore", "Connection to Video Content", "Overall Reflection"
+  - Scrollable feedback container with max-height for long content
+- **Voice Consistency Fix** (`services/geminiService.ts`, `hooks/useVoiceRoleplay.ts`):
+  - Fixed voice changing between rounds (male → female issue)
+  - `sessionVoice.current` now always used, never falls back to emotion-based selection
+  - Added fallback initialization in `generateTTSAudio` and `textToSpeechWithEmotion`
+- **Voice Gender Mapping** (`services/geminiService.ts`):
+  - Updated `selectVoiceForPersona()` with correct Gemini TTS API voice genders
+  - Male voices: Achird, Alnilam, Charon, Orus (was incorrectly using Achird for females)
+  - Female voices: Kore, Aoede, Erinome, Sulafat
+  - Added CEO, officer, director detection for professional personas
+- **Round Counter Fix** (`hooks/useVoiceRoleplay.ts`):
+  - Rounds now count user messages sent, not full exchanges
+  - Increment moved to when user message is added (before AI response)
+  - Both voice and text modes now properly increment rounds
+- **Session Feedback UI** (`components/VoiceRoleplay.tsx`):
+  - Added `max-h-64 overflow-y-auto` for scrollable feedback content
+  - Sticky header stays visible while scrolling feedback
+
+### v0.9.0 (2026-01-27) - Code Review & Cleanup
+- **Removed Deprecated Components**:
+  - Deleted `InteractionPanel.tsx` (745 lines) - legacy fallback replaced by LearningPanel
+  - Deleted `TechnicalPanel.tsx` (623 lines) - consolidated into LearningPanel
+  - Deleted `OthersPanel.tsx` (90 lines) - consolidated into LearningPanel
+  - Total: ~1,458 lines of dead code removed
+- **Fixed TypeScript Errors**:
+  - Resolved type narrowing issue with `AppMode` enum comparisons in InteractionPanel
+  - Root cause: InteractionPanel was receiving subset of AppMode types but checking for excluded values
+  - Fix: Replaced InteractionPanel fallback with inline loading state component
+- **Improved Loading State UI**:
+  - New loading component in App.tsx shows "Analyzing Video..." with animated progress indicators
+  - Better UX during Gemini API analysis phase
+  - Shows step-by-step progress: "Analyzing content", "Generating questions", "Creating study plan"
+- **Enhanced utils.ts**:
+  - Added `parseTimestamp()` - convert MM:SS back to seconds
+  - Added `isValidYouTubeUrl()` - validate YouTube URL format
+  - Added `getScoreLabel()` - human-readable score labels (Excellent, Great, Good, etc.)
+  - Added `safeJsonParse()` - safe JSON parsing with fallback
+  - Added `generateId()` - UUID generation wrapper
+  - Added `sanitizeFilename()` - remove invalid filename characters
+  - Added `sleep()` - promise-based delay utility
+  - Added `clamp()` - clamp number between min/max
+  - Fixed `any` type in `debounce()` - now uses `unknown`
+  - Added null safety checks to `formatTimestamp()`, `renderMarkdown()`, `truncateText()`
+- **Architecture Improvements**:
+  - LearningPanel is now the sole panel component for all modes
+  - Cleaner separation of concerns: App.tsx handles state, LearningPanel handles UI
+  - Reduced import complexity in App.tsx
 
 ### v0.8.0 (2026-01-26) - Unified Export & Completion Fixes
 - **ExportModal Component** (`components/ExportModal.tsx`):
