@@ -221,7 +221,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
       parts.push('| Component | Qty | Specifications | Purpose |');
       parts.push('|-----------|-----|----------------|---------|');
       technicalPlan.components.forEach(c => {
-        parts.push(`| ${c.name} | ${c.quantity || 1} | ${c.specifications || '-'} | ${c.purpose || '-'} |`);
+        parts.push(`| ${c.name} | ${c.quantity || '-'} | ${c.specifications || '-'} | ${c.purpose || '-'} |`);
       });
       parts.push('\n---\n');
     }
@@ -351,7 +351,12 @@ const ExportModal: React.FC<ExportModalProps> = ({
     setExportError(null);
 
     try {
-      const result = await exportToGoogleDocs(lessonPlan, googleAccessToken, sessionHistory);
+      const result = await exportToGoogleDocs(
+        lessonPlan, 
+        googleAccessToken, 
+        sessionHistory,
+        { userNotes, aiNotes }
+      );
       window.open(result.documentUrl, '_blank');
       onClose();
     } catch (error) {

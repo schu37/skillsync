@@ -62,6 +62,10 @@ interface LearningPanelProps {
   // Export/Auth
   googleAccessToken?: string | null;
   onRequestGoogleAuth?: () => void;
+  
+  // Regenerate Q&A only
+  onRegenerateQuestionsOnly?: () => void;
+  isRegenerating?: boolean;
 }
 
 type TabConfig = {
@@ -96,6 +100,8 @@ const LearningPanel: React.FC<LearningPanelProps> = ({
   selectedScenario,
   googleAccessToken,
   onRequestGoogleAuth,
+  onRegenerateQuestionsOnly,
+  isRegenerating = false,
 }) => {
   const [activeTab, setActiveTab] = useState<string>('overview');
   
@@ -116,14 +122,14 @@ const LearningPanel: React.FC<LearningPanelProps> = ({
       );
     }
     
-    // Q&A tab for technical and soft modes
+    // Q&A tab for all modes that have questions
     if (lessonPlan.stopPoints?.length > 0) {
       baseTabs.push({
         id: 'qa',
         label: 'Q&A',
         icon: '❓',
         count: lessonPlan.stopPoints.length,
-        modes: ['technical', 'soft'],
+        modes: ['technical', 'soft', 'others'],
       });
     }
     
@@ -152,7 +158,8 @@ const LearningPanel: React.FC<LearningPanelProps> = ({
     } else if (planMode === 'soft') {
       setActiveTab(lessonPlan.stopPoints?.length > 0 ? 'qa' : 'notes');
     } else {
-      setActiveTab('notes');
+      // 'others' mode - show Q&A if available, else notes
+      setActiveTab(lessonPlan.stopPoints?.length > 0 ? 'qa' : 'notes');
     }
   }, [planMode, lessonPlan]);
 
@@ -253,6 +260,8 @@ const LearningPanel: React.FC<LearningPanelProps> = ({
             answeredQuestionIds={answeredQuestionIds}
             showVoiceRoleplayButton={showVoiceRoleplayButton && planMode === 'soft'}
             onStartVoiceRoleplay={onStartVoiceRoleplay}
+            onRegenerateQuestionsOnly={onRegenerateQuestionsOnly}
+            isRegenerating={isRegenerating}
           />
         </div>
 
@@ -387,7 +396,7 @@ const PartsTab: React.FC<{ components: Component[] }> = ({ components }) => {
   const handleCopyPartsList = () => {
     const partsList = components.map((part, i) => {
       let text = `${i + 1}. ${part.name}`;
-      if (part.quantity) text += ` (×${part.quantity})`;
+      if (part.quantity) text += ` (${part.quantity})`;
       if (part.specifications) text += `\n   Specs: ${part.specifications}`;
       if (part.purpose) text += `\n   Purpose: ${part.purpose}`;
       if (part.estimatedCost) text += `\n   Cost: ${part.estimatedCost}`;
@@ -413,7 +422,7 @@ const PartsTab: React.FC<{ components: Component[] }> = ({ components }) => {
                 <span className="font-medium text-slate-800">{part.name}</span>
                 {part.quantity && (
                   <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded">
-                    ×{part.quantity}
+                    {part.quantity}
                   </span>
                 )}
               </div>
@@ -624,6 +633,8 @@ interface QATabProps {
   answeredQuestionIds?: Set<string>;
   showVoiceRoleplayButton?: boolean;
   onStartVoiceRoleplay?: () => void;
+  onRegenerateQuestionsOnly?: () => void;
+  isRegenerating?: boolean;
 }
 
 const QATab: React.FC<QATabProps> = ({
@@ -639,6 +650,8 @@ const QATab: React.FC<QATabProps> = ({
   answeredQuestionIds = new Set(),
   showVoiceRoleplayButton,
   onStartVoiceRoleplay,
+  onRegenerateQuestionsOnly,
+  isRegenerating = false,
 }) => {
   const [answer, setAnswer] = useState('');
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -732,6 +745,24 @@ const QATab: React.FC<QATabProps> = ({
           <p className="text-sm text-slate-600 italic">
             Use the Export button to download your session notes and Q&A history.
           </p>
+          
+          {/* Regenerate Questions Button for more practice */}
+          {onRegenerateQuestionsOnly && (
+            <button
+              onClick={onRegenerateQuestionsOnly}
+              disabled={isRegenerating}
+              className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mx-auto"
+            >
+              {isRegenerating ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  Generating...
+                </>
+              ) : (
+                <>🔄 Practice More (New Questions)</>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Session History */}
@@ -781,7 +812,26 @@ const QATab: React.FC<QATabProps> = ({
     <div className="space-y-4">
       {/* Question List */}
       <div className="bg-slate-50 p-3 rounded-lg">
-        <h3 className="text-sm font-bold text-slate-700 mb-2">Questions ({stopPoints.length})</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-bold text-slate-700">Questions ({stopPoints.length})</h3>
+          {onRegenerateQuestionsOnly && (
+            <button
+              onClick={onRegenerateQuestionsOnly}
+              disabled={isRegenerating}
+              className="text-xs px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              title="Generate new practice questions (keeps other content)"
+            >
+              {isRegenerating ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></span>
+                  Regenerating...
+                </>
+              ) : (
+                <>🔄 New Questions</>
+              )}
+            </button>
+          )}
+        </div>
         <div className="space-y-1 max-h-40 overflow-y-auto">
           {stopPoints.map((sp, idx) => {
             const isAnswered = answeredQuestionIds.has(sp.id);

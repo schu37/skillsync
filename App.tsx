@@ -250,32 +250,51 @@ const App: React.FC = () => {
         }, 500);
       }
     } else {
-      // Need to re-analyze for this mode
-      loadLesson(videoId, false);
+      // Need to re-analyze for this mode - pass newMode explicitly since setState is async
+      loadLesson(videoId, false, newMode);
     }
   };
 
-  const loadLesson = async (id: string, forceRefresh: boolean = false) => {
+  const loadLesson = async (id: string, forceRefresh: boolean = false, overrideMode?: SkillMode) => {
+    // Use overrideMode if provided, otherwise use current skillMode
+    const modeToUse = overrideMode || skillMode;
+    
     setVideoId(id);
     setMode(AppMode.LOADING_PLAN);
-    setLoadingMode(skillMode); // Track which mode we're loading
+    setLoadingMode(modeToUse); // Track which mode we're loading
     setIsPlaying(false);
+    
+    // Clear old lesson plan to prevent showing stale content from wrong mode
+    setLessonPlan(null);
+    setCurrentStopIndex(0);
+    setSessionHistory([]);
     
     try {
       // For soft skills, default to first preset if none selected
-      const effectivePreset = skillMode === 'soft' && !selectedPreset 
+      const effectivePreset = modeToUse === 'soft' && !selectedPreset 
         ? 'negotiation' 
         : selectedPreset;
       
       // Gemini 3 analyzes the video with native video input
-      const plan = await generateLessonPlan(id, skillMode, {
-        scenarioPreset: skillMode === 'soft' ? effectivePreset : undefined,
-        projectType: skillMode === 'technical' ? effectivePreset : undefined,
+      const plan = await generateLessonPlan(id, modeToUse, {
+        scenarioPreset: modeToUse === 'soft' ? effectivePreset : undefined,
+        projectType: modeToUse === 'technical' ? effectivePreset : undefined,
         forceRefresh, // Pass through to bypass cache
       });
       
-      // Ensure robust stop points
+      // Ensure robust stop points with IDs
       plan.stopPoints = plan.stopPoints.map((sp, i) => ({ ...sp, id: `sp-${i}` }));
+      
+      // Validate timestamps - filter out any that exceed video duration (safety net)
+      if (plan.videoDurationSeconds && plan.videoDurationSeconds > 0) {
+        const maxTimestamp = plan.videoDurationSeconds - 1; // Leave 1 second buffer
+        const originalCount = plan.stopPoints.length;
+        plan.stopPoints = plan.stopPoints.filter(sp => sp.timestamp <= maxTimestamp);
+        if (plan.stopPoints.length < originalCount) {
+          console.warn(`Filtered ${originalCount - plan.stopPoints.length} stop points with invalid timestamps > ${maxTimestamp}s`);
+        }
+      }
+      
       plan.stopPoints.sort((a, b) => a.timestamp - b.timestamp);
       
       setLessonPlan(plan);
@@ -306,10 +325,10 @@ const App: React.FC = () => {
 
   const handleStartDemo = () => {
     setVideoUrl(`https://www.youtube.com/watch?v=${DEMO_VIDEO_ID}`);
-    // For demo, skip detection and use soft skills
+    // For demo, skip detection and use soft skills - pass 'soft' explicitly
     setSkillMode('soft');
     setIsUserOverride(false);
-    loadLesson(DEMO_VIDEO_ID);
+    loadLesson(DEMO_VIDEO_ID, false, 'soft');
   };
 
   // New flow: URL submit -> detect mode -> show detected -> user confirms -> load lesson
@@ -364,7 +383,8 @@ const App: React.FC = () => {
   // User confirms the detected/selected mode and proceeds to lesson
   const handleConfirmMode = () => {
     if (videoId) {
-      loadLesson(videoId);
+      // Pass skillMode explicitly to avoid any state timing issues
+      loadLesson(videoId, false, skillMode);
     }
   };
 
@@ -517,6 +537,48 @@ const App: React.FC = () => {
     }
   };
 
+  // Regenerate ONLY Q&A questions, keeping other content (components, tools, etc.)
+  const handleRegenerateQuestionsOnly = async () => {
+    if (!videoId || !lessonPlan || isRegenerating) return;
+    
+    setIsRegenerating(true);
+    
+    try {
+      // Use regenerateQuestionsOnly which preserves components, tools, build steps, etc.
+      const plan = await regenerateQuestionsOnly(videoId, skillMode, {
+        scenarioPreset: skillMode === 'soft' ? selectedPreset : undefined,
+        projectType: skillMode === 'technical' ? selectedPreset : undefined,
+      });
+      
+      // Ensure robust stop points with unique IDs
+      plan.stopPoints = plan.stopPoints.map((sp, i) => ({ ...sp, id: `sp-${i}-${Date.now()}` }));
+      plan.stopPoints.sort((a, b) => a.timestamp - b.timestamp);
+      
+      setLessonPlan(plan);
+      setCurrentStopIndex(0);
+      setSessionHistory([]);
+      setAnsweredQuestionIds(new Set());
+      
+      // Clear previous answers
+      sessionStorage.clearAnswers(plan.videoUrl, skillMode);
+      await storage.saveLessonPlan(plan);
+      
+      // Stay in current mode or transition smoothly
+      if (mode === AppMode.COMPLETED || mode === AppMode.PACK_READY) {
+        setMode(AppMode.PLAN_READY);
+        setTimeout(() => {
+          setMode(AppMode.PLAYING);
+          setIsPlaying(true);
+        }, 500);
+      }
+    } catch (e) {
+      console.error('Failed to regenerate questions:', e);
+      alert('Failed to generate new questions. Please try again.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   // Load answered questions when lesson plan loads
   useEffect(() => {
     if (lessonPlan && lessonPlan.videoUrl) {
@@ -527,13 +589,9 @@ const App: React.FC = () => {
     }
   }, [lessonPlan, skillMode]);
 
-  // Load lesson plan on video ID change
-  useEffect(() => {
-    if (videoId) {
-      setMode(AppMode.LOADING_PLAN);
-      loadLesson(videoId);
-    }
-  }, [videoId]);
+  // NOTE: Removed problematic useEffect that auto-loaded lessons on videoId change.
+  // This was causing race conditions with the detection flow, loading lessons with stale skillMode.
+  // The proper flow is: handleUrlSubmit -> detection -> handleConfirmMode -> loadLesson
 
   // Check if on a legal page
   const isLegalPage = window.location.pathname === '/terms' || window.location.pathname === '/privacy';
@@ -779,7 +837,7 @@ const App: React.FC = () => {
                 
                 {/* Re-analyze button */}
                 <button
-                  onClick={() => loadLesson(videoId, true)}
+                  onClick={() => loadLesson(videoId, true, skillMode)}
                   title="Re-analyze video with current settings"
                   className="text-xs px-2 py-1 bg-red-400 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium transition-colors flex items-center gap-1"
                 >
@@ -907,7 +965,7 @@ const App: React.FC = () => {
                 {videoCache.get(videoUrl, skillMode) && (
                   <div className="flex items-center justify-center gap-2 text-sm text-emerald-600 bg-emerald-50 px-4 py-2 rounded-lg">
                     <span>📦 Cached lesson available</span>
-                    <button onClick={() => loadLesson(videoId, true)} className="underline font-medium">Re-analyze</button>
+                    <button onClick={() => loadLesson(videoId, true, skillMode)} className="underline font-medium">Re-analyze</button>
                   </div>
                 )}
                 
@@ -981,6 +1039,8 @@ const App: React.FC = () => {
                    selectedScenario={selectedPreset}
                    googleAccessToken={googleAccessToken}
                    onRequestGoogleAuth={googleLogin}
+                   onRegenerateQuestionsOnly={handleRegenerateQuestionsOnly}
+                   isRegenerating={isRegenerating}
                  />
              ) : (
                // Fallback for IDLE/LOADING states - show InteractionPanel for loading UI

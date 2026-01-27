@@ -3,6 +3,7 @@ import {
   LessonPlan, 
   SoftSkillsLessonPlan, 
   TechnicalLessonPlan, 
+  OthersLessonPlan,
   Evaluation, 
   StudyPack, 
   StopPoint,
@@ -88,6 +89,7 @@ const StopPointSchema: Schema = {
 const SoftSkillsLessonPlanSchema: Schema = {
   type: Type.OBJECT,
   properties: {
+    videoDurationSeconds: { type: Type.NUMBER, description: "The ACTUAL total duration of the video in seconds. MUST be accurate." },
     skillsDetected: { type: Type.ARRAY, items: { type: Type.STRING } },
     suitabilityScore: { type: Type.NUMBER, description: "0 to 100 score indicating how educational the video is." },
     summary: { type: Type.STRING },
@@ -96,20 +98,20 @@ const SoftSkillsLessonPlanSchema: Schema = {
     scenarioPreset: { type: Type.STRING, description: "The scenario type detected (negotiation, interview, etc.)" },
     rolePlayPersona: { type: Type.STRING, description: "A persona description for voice roleplay practice." },
   },
-  required: ["skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints"],
+  required: ["videoDurationSeconds", "skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints"],
 };
 
 const ComponentSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    name: { type: Type.STRING },
-    quantity: { type: Type.NUMBER },
-    specifications: { type: Type.STRING },
-    purpose: { type: Type.STRING },
+    name: { type: Type.STRING, description: "Name of the ingredient, component, or part" },
+    quantity: { type: Type.STRING, description: "Amount with units (e.g., '2 cups', '½ tsp', '1 large', '10 cloves')" },
+    specifications: { type: Type.STRING, description: "Details like size, type, grade (e.g., 'finely chopped', 'fine grind')" },
+    purpose: { type: Type.STRING, description: "What this ingredient/component is used for" },
     alternatives: { type: Type.ARRAY, items: { type: Type.STRING } },
     estimatedCost: { type: Type.STRING },
   },
-  required: ["name"],
+  required: ["name", "quantity"],
 };
 
 const ToolSchema: Schema = {
@@ -153,6 +155,7 @@ const DesignDecisionSchema: Schema = {
 const TechnicalLessonPlanSchema: Schema = {
   type: Type.OBJECT,
   properties: {
+    videoDurationSeconds: { type: Type.NUMBER, description: "The ACTUAL total duration of the video in seconds. MUST be accurate." },
     skillsDetected: { type: Type.ARRAY, items: { type: Type.STRING } },
     suitabilityScore: { type: Type.NUMBER },
     summary: { type: Type.STRING },
@@ -168,7 +171,7 @@ const TechnicalLessonPlanSchema: Schema = {
     safetyOverview: { type: Type.STRING },
     requiredPrecautions: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
-  required: ["skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints", "projectType", "components", "tools", "buildSteps", "designDecisions"],
+  required: ["videoDurationSeconds", "skillsDetected", "suitabilityScore", "summary", "videoContext", "stopPoints", "projectType", "components", "tools", "buildSteps", "designDecisions"],
 };
 
 const EvidenceQuoteSchema: Schema = {
@@ -436,6 +439,8 @@ ${regenerationNote}
 
 WATCH THE VIDEO CAREFULLY and perform these tasks:
 
+⚠️ FIRST: Determine the EXACT video duration in seconds and store it in videoDurationSeconds. This is CRITICAL for timestamp validation.
+
 1. IDENTIFY 1-3 key soft skills being demonstrated or taught
 2. RATE the video's educational value (0-100) for skill development
 3. CREATE a detailed summary of the video content
@@ -447,6 +452,8 @@ ${getQuestionTypesReference()}
 
 FOR EACH STOP POINT:
 - timestamp: Exact second to pause (be precise based on what you see/hear)
+  ⚠️ CRITICAL: ALL timestamps MUST be LESS THAN videoDurationSeconds. NEVER generate a timestamp >= video length.
+  ⚠️ Example: If videoDurationSeconds=161, all timestamps must be 0-160.
 - contextSummary: What was just discussed or demonstrated
 - question: A thoughtful question matching one of the types above
 - questionType: One of: ${Object.keys(QUESTION_TYPES).map(k => QUESTION_TYPES[k as keyof typeof QUESTION_TYPES].id).join(', ')}
@@ -533,8 +540,25 @@ ${regenerationNote}
 
 WATCH THE VIDEO CAREFULLY and perform these tasks:
 
+⚠️ FIRST: Determine the EXACT video duration in seconds and store it in videoDurationSeconds. This is CRITICAL for timestamp validation.
+
 1. IDENTIFY the project type and difficulty level (beginner/intermediate/advanced)
-2. EXTRACT ALL components/parts mentioned
+
+2. EXTRACT **EVERY SINGLE** component/ingredient/part/material mentioned in the video:
+   - COOKING: ALL ingredients with EXACT measurements (e.g., "2 cups flour", "½ tsp salt", "1 large onion")
+   - ELECTRONICS: ALL components with specifications (e.g., "10kΩ resistor", "Arduino Uno", "5V power supply")
+   - WOODWORKING: ALL materials with dimensions (e.g., "2x4 lumber, 8ft", "wood screws #8 x 1.5in")
+   - AUTOMOTIVE: ALL parts with model numbers (e.g., "oil filter FL-500S", "5W-30 oil, 5 quarts")
+   - 3D PRINTING: ALL filament types, settings, hardware
+   - CRAFTS/DIY: ALL materials with quantities
+   
+   ⚠️ DO NOT SKIP OR OMIT ANY ITEMS, including:
+   - Common items (oil, salt, water, screws, tape, glue, wire, etc.)
+   - Items mentioned but not emphasized
+   - Items shown on screen but not spoken aloud
+   - Consumables and disposables
+   
+   ⚠️ Include EXACT quantities/measurements as stated in the video
 3. LIST ALL tools required or recommended
 4. CREATE step-by-step BUILD INSTRUCTIONS
 5. IDENTIFY DESIGN DECISIONS and explain the "why"
@@ -545,6 +569,9 @@ QUESTION TYPES TO USE (mix these for comprehensive learning):
 ${getQuestionTypesReference()}
 
 FOR EACH STOP POINT:
+- timestamp: Exact second to pause for the question
+  ⚠️ CRITICAL: ALL timestamps MUST be LESS THAN videoDurationSeconds. NEVER generate a timestamp >= video length.
+  ⚠️ Example: If videoDurationSeconds=161, all timestamps must be 0-160.
 - Generate questions with proper questionType from the list above
 - Focus on design-reasoning, application, and diagnostic questions for technical content
 - scoringCriteria: 3-5 specific criteria, points totaling 5
@@ -555,6 +582,8 @@ BALANCE YOUR QUESTIONS:
 - At least one application or synthesis question
 
 7. WRITE a safety overview with required precautions
+
+CRITICAL REQUIREMENT: The components array MUST be COMPLETE. If a video mentions 11 items, you must list 11 components. If a video shows 15 parts, you must list 15 components. NEVER summarize, group, or omit items. Completeness is essential for users who need to purchase materials.
 
 Be specific and reference actual content from the video.
 `;
@@ -842,6 +871,8 @@ export const regenerateQuestionsOnly = async (
   
   if (mode === 'technical') {
     return regenerateTechnicalQuestions(ai, youtubeUrl, cachedContext, regenerationSeed);
+  } else if (mode === 'others') {
+    return regenerateOthersQuestions(ai, youtubeUrl, cachedContext, regenerationSeed);
   } else {
     return regenerateSoftSkillsQuestions(ai, youtubeUrl, cachedContext, regenerationSeed);
   }
@@ -999,6 +1030,78 @@ Be creative and explore angles not covered in previous questions.
     return result;
   } catch (e) {
     console.error("Failed to parse regenerated technical questions", e);
+    throw new Error("Failed to generate new questions. Please try again.");
+  }
+};
+
+const regenerateOthersQuestions = async (
+  ai: GoogleGenAI,
+  youtubeUrl: string,
+  context: any,
+  regenerationSeed: number
+): Promise<OthersLessonPlan> => {
+  const systemPrompt = `
+You are an expert instructional designer for 'SkillSync'.
+
+REGENERATION REQUEST #${regenerationSeed}: Generate COMPLETELY DIFFERENT questions than before.
+
+You have already analyzed this video. Here is the context:
+
+VIDEO SUMMARY: ${context.summary}
+VIDEO CONTEXT: ${context.videoContext}
+SKILLS DETECTED: ${context.skillsDetected.join(', ')}
+
+NOW GENERATE NEW STOP POINTS (questions only):
+- Create 4-8 NEW questions at DIFFERENT timestamps than before
+- Focus on DIFFERENT aspects of the content
+- Include comprehension, application, and analysis questions
+- Each question must have scoringCriteria (3-5 criteria, total 5 points)
+
+Be creative and explore angles not covered in previous questions.
+`;
+
+  const StopPointsOnlySchema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      stopPoints: { type: Type.ARRAY, items: StopPointSchema },
+    },
+    required: ["stopPoints"],
+  };
+
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODELS.flashPreview,
+    contents: `Generate new questions for this video based on the provided context.`,
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: "application/json",
+      responseSchema: StopPointsOnlySchema,
+    },
+  });
+
+  const text = response.text || "{}";
+  logApi('regenerateOthersQuestions - Response', { rawText: text.slice(0, 300) + '...' });
+  
+  try {
+    const parsed = JSON.parse(text);
+    const result: OthersLessonPlan = {
+      id: crypto.randomUUID(),
+      videoUrl: youtubeUrl,
+      mode: 'others',
+      createdAt: new Date().toISOString(),
+      skillsDetected: context.skillsDetected,
+      suitabilityScore: context.suitabilityScore,
+      summary: context.summary,
+      videoContext: context.videoContext,
+      stopPoints: parsed.stopPoints || [],
+      scenarioPreset: context.scenarioPreset,
+    };
+    
+    // Cache the new plan
+    videoCache.set(youtubeUrl, 'others', result);
+    
+    return result;
+  } catch (e) {
+    console.error("Failed to parse regenerated others questions", e);
     throw new Error("Failed to generate new questions. Please try again.");
   }
 };
