@@ -40,3 +40,7 @@ This contains everything you need to run your app locally.
 - Local storage may be invalid if you delete browser cookies.
 
 - Voice roleplay may have delayed responses in the 8 rounds of conversation.
+
+- After the regeneration of the question in Q&A, question markers on the video timeline might be inaccurate.
+
+- Caching issue for the progress of the same URL; The progress of a certain learning panel may not be saved.
