@@ -12,9 +12,20 @@ This contains everything you need to run your app locally.
 
 **Prerequisites:**  Node.js
 
+1. Copy .env.example into .env.local and Set the environment variables with your Gemini API key. Your API keys need access to models below:
 
-1. Install dependencies:
+      flash: 'gemini-3-flash-preview',
+
+      flashPreview: 'gemini-3-flash-preview',
+
+      live: 'gemini-live-2.5-flash-preview-native-audio-09-2025', 
+
+      pro: 'gemini-3-pro-preview',
+
+      tts: 'gemini-2.5-flash-preview-tts'
+
+2. Install dependencies:
    `npm install`
-2. Set the environment variables following [.env.example] with your Gemini API key into .env.local
 3. Run the app:
    `npm run dev`
+4. Open [http://localhost:3001](http://localhost:3001) in your browser to see the result.
