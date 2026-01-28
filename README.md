@@ -29,3 +29,14 @@ This contains everything you need to run your app locally.
 3. Run the app:
    `npm run dev`
 4. Open [http://localhost:3001](http://localhost:3001) in your browser to see the result.
+
+# Bugs:
+# As of Jan 28, 2026:
+
+- I did not charge too much for the Gemini APIs. Therefore, models may exceed my budget if you use the SkillSync website. Many functions will show errors if that happens.
+
+- You may need to manually click re-analyze videos if a video is wrongly categorized or you want to try different categories on the same video (soft, technical, general).
+
+- Local storage may be invalid if you delete browser cookies.
+
+- Voice roleplay may have delayed responses in the 8 rounds of conversation.
